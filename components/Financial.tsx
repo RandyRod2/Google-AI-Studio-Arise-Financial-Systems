@@ -1,9 +1,12 @@
 
-import React, { useState, useEffect } from 'react';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { generateRevenueData, generateProductMix, MOCK_TEAM } from '../services/mockData';
-import { DollarSign, TrendingUp, TrendingDown, CreditCard, AlertTriangle, Users, Wallet, PieChart, Briefcase, Edit2, X, Save, Clock, ArrowRightLeft, Landmark } from 'lucide-react';
-import { Client, PolicyStatus, TeamMember } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+// Add PieChart and Pie to the recharts import
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, PieChart, Pie } from 'recharts';
+// Import missing mock data and generation functions
+import { generateRevenueData, MOCK_TEAM } from '../services/mockData';
+// Rename PieChart from lucide-react to PieChartIcon to avoid collision
+import { DollarSign, TrendingUp, TrendingDown, CreditCard, AlertTriangle, Users, Wallet, PieChart as PieChartIcon, Briefcase, Edit2, X, Save, Clock, ArrowRightLeft, Landmark, BarChart3 } from 'lucide-react';
+import { Client, PolicyStatus, TeamMember, PolicyType } from '../types';
 import { calculateCommissionExact } from '../services/commissionService';
 
 interface FinancialProps {
@@ -20,10 +23,8 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
     const [viewMode, setViewMode] = useState<'PERSONAL' | 'TEAM'>('PERSONAL');
     const [timeFrame, setTimeFrame] = useState<'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YTD'>('YTD');
     
-    // --- State ---
     const [expenseData, setExpenseData] = useState<ExpenseData>({ leads: 0, software: 0, licensing: 0 });
     
-    // Overrides Persistence (Expenses only now)
     const [overrides, setOverrides] = useState<Record<string, { expenses?: ExpenseData }>>(() => {
         try {
             const saved = localStorage.getItem('arise_financial_overrides_v1');
@@ -33,12 +34,9 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
         }
     });
 
-    // Modals
     const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-    
     const [tempExpenseData, setTempExpenseData] = useState<ExpenseData>({ leads: 0, software: 0, licensing: 0 });
 
-    // Load Team for Commission Calculation
     const [teamMembers] = useState<TeamMember[]>(() => {
         try {
             const saved = localStorage.getItem('arise_team_members');
@@ -52,34 +50,24 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
         return teamMembers.find(m => m.id === client.agentId) || teamMembers[0];
     };
 
-    // --- Helper: Date filtering logic (Standardized to Local Time) ---
     const isDateInTimeFrame = (dateStr?: string) => {
         if (!dateStr) return false;
-        
-        // Manual parse to prevent UTC shifts
         const [y, m, d] = dateStr.split('-').map(Number);
         const checkDate = new Date(y, m - 1, d);
         checkDate.setHours(0,0,0,0);
-
         const now = new Date();
         now.setHours(23, 59, 59, 999);
-        
         const currentYear = now.getFullYear();
-
-        if (timeFrame === 'YTD') {
-            return checkDate.getFullYear() === currentYear && checkDate <= now;
-        }
+        if (timeFrame === 'YTD') return checkDate.getFullYear() === currentYear && checkDate <= now;
         if (timeFrame === 'QUARTERLY') {
             const currentQuarter = Math.floor(now.getMonth() / 3);
             const checkQuarter = Math.floor(checkDate.getMonth() / 3);
             return checkDate.getFullYear() === currentYear && checkQuarter === currentQuarter;
         }
-        if (timeFrame === 'MONTHLY') {
-            return checkDate.getFullYear() === currentYear && checkDate.getMonth() === now.getMonth();
-        }
+        if (timeFrame === 'MONTHLY') return checkDate.getFullYear() === currentYear && checkDate.getMonth() === now.getMonth();
         if (timeFrame === 'WEEKLY') {
             const day = now.getDay();
-            const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Adjust to Monday
+            const diff = now.getDate() - day + (day === 0 ? -6 : 1);
             const startOfWeek = new Date(now);
             startOfWeek.setDate(diff);
             startOfWeek.setHours(0,0,0,0);
@@ -88,104 +76,78 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
         return true;
     };
 
-    // --- Derived CRM Data (Source of Truth) ---
-    
-    // Flatten and enrich policies with calculated commissions
-    const enrichedPolicies = clients.flatMap(client => {
+    const enrichedPolicies = useMemo(() => clients.flatMap(client => {
         const agentProfile = getAgentForClient(client.id);
-        
         return client.policies.map(policy => {
-            // Recalculate commission based on registry
-            const carrier = policy.carrier;
-            const product = policy.productName || '';
-            const compLevel = agentProfile.carrierCompLevels?.[carrier] || agentProfile.defaultCompLevel || 100;
-            const { total } = calculateCommissionExact(carrier, product, policy.premium, compLevel);
-            
-            return {
-                ...policy,
-                calculatedCommission: total
-            };
+            const { total } = calculateCommissionExact(policy.carrier, policy.productName || '', policy.premium, agentProfile.carrierCompLevels?.[policy.carrier] || agentProfile.defaultCompLevel || 100);
+            return { ...policy, calculatedCommission: total };
         });
-    });
+    }), [clients, teamMembers]);
     
-    // "Potential / Submitted" includes Active, Approved, Pending, Issued. 
-    // Uses submittedDate as primary key for performance timing.
-    const periodPolicies = enrichedPolicies.filter(p => 
+    const periodPolicies = useMemo(() => enrichedPolicies.filter(p => 
         ['Active', 'Approved', 'Pending', 'Issued'].includes(p.status) &&
         isDateInTimeFrame(p.submittedDate || p.startDate)
-    );
+    ), [enrichedPolicies, timeFrame]);
 
-    // Projections - Use Calculated Commission
+    // Carrier Mix Data - Aggregated from Real Policies
+    const carrierVolumeData = useMemo(() => {
+        const mix: Record<string, number> = {};
+        periodPolicies.forEach(p => {
+            mix[p.carrier] = (mix[p.carrier] || 0) + p.premium;
+        });
+        return Object.entries(mix)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value);
+    }, [periodPolicies]);
+
+    // Product Mix Data - Aggregated from Real Policies
+    const productMixData = useMemo(() => {
+        const mix: Record<string, number> = {};
+        periodPolicies.forEach(p => {
+            const type = p.type || 'Other';
+            mix[type] = (mix[type] || 0) + p.premium;
+        });
+        return Object.entries(mix)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value);
+    }, [periodPolicies]);
+
     const totalProjectedCommission = periodPolicies.reduce((sum, p) => sum + p.calculatedCommission, 0);
     const totalAdvance = totalProjectedCommission * 0.75; 
     const totalBackend = totalProjectedCommission * 0.25;
-
-    // Realized from CRM (Actually Paid)
-    // Tracks the 75% Advance amount for issued policies
     const paidPolicies = periodPolicies.filter(p => p.isPaidOut === true);
     const crmPaidCommission = paidPolicies.reduce((sum, p) => sum + (p.calculatedCommission * 0.75), 0);
-
-    // Pending (Not paid yet)
-    // Tracks the expected 75% Advance amount for pending policies
     const pendingPolicies = periodPolicies.filter(p => !p.isPaidOut);
     const totalPendingCommission = pendingPolicies.reduce((sum, p) => sum + (p.calculatedCommission * 0.75), 0);
 
-
-    // --- Effect: Recalculate or Load Overrides on TimeFrame Change ---
     useEffect(() => {
         const currentOverride = overrides[timeFrame];
-
-        // EXPENSE LOGIC
         if (currentOverride?.expenses) {
             setExpenseData(currentOverride.expenses);
         } else {
-            // Default: Calculate scalable mock expenses
             const baseMonthly = { leads: 2500, software: 99, licensing: 50 };
             let multiplier = 1;
             if (timeFrame === 'WEEKLY') multiplier = 0.23;
             if (timeFrame === 'QUARTERLY') multiplier = 3;
             if (timeFrame === 'YTD') multiplier = (new Date().getMonth() + 1);
-
             setExpenseData({
                 leads: Math.round(baseMonthly.leads * multiplier),
                 software: Math.round(baseMonthly.software * multiplier),
                 licensing: Math.round(baseMonthly.licensing * multiplier)
             });
         }
-
     }, [timeFrame, overrides]); 
 
-    // --- Persist Overrides ---
-    const updateOverrides = (data: ExpenseData) => {
-        const updated = {
-            ...overrides,
-            [timeFrame]: {
-                ...overrides[timeFrame],
-                expenses: data
-            }
-        };
-        setOverrides(updated);
-        localStorage.setItem('arise_financial_overrides_v1', JSON.stringify(updated));
-    };
-
-    // --- Calculation Variables ---
     const totalExpenses = expenseData.leads + expenseData.software + expenseData.licensing;
-    
-    // Team Logic (Mocked for demo as before, can be expanded later)
     const timeScale = timeFrame === 'WEEKLY' ? 0.02 : timeFrame === 'MONTHLY' ? 0.08 : timeFrame === 'QUARTERLY' ? 0.25 : 1;
     const teamTotalProduction = MOCK_TEAM.reduce((acc, curr) => acc + curr.production, 0) * timeScale;
     const teamOverridesMock = Math.round(teamTotalProduction * 0.15); 
-
-    // Display Values
     const displayTotal = viewMode === 'PERSONAL' ? crmPaidCommission : teamOverridesMock;
     const displayPending = viewMode === 'PERSONAL' ? totalPendingCommission : Math.round(teamTotalProduction * 0.05);
     const displayTitle = viewMode === 'PERSONAL' ? 'Realized Income' : 'Overrides';
     const netIncome = displayTotal - totalExpenses;
     const profitMargin = displayTotal > 0 ? (netIncome / displayTotal) * 100 : 0;
 
-    // --- Handlers: Modal Open/Close ---
-    
-    // EXPENSES
     const openExpenseModal = () => {
         setTempExpenseData({ ...expenseData });
         setIsExpenseModalOpen(true);
@@ -193,18 +155,22 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
 
     const saveExpenses = () => {
         setExpenseData(tempExpenseData);
-        updateOverrides(tempExpenseData);
+        const updated = { ...overrides, [timeFrame]: { ...overrides[timeFrame], expenses: tempExpenseData } };
+        setOverrides(updated);
+        localStorage.setItem('arise_financial_overrides_v1', JSON.stringify(updated));
         setIsExpenseModalOpen(false);
     };
 
-    // Chart Data
     const revenueChartData = generateRevenueData().map(d => ({
         ...d,
         commissions: viewMode === 'TEAM' ? d.commissions * 1.5 : d.commissions
     }));
 
+    // More distinct colors for product distribution
+    const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+
     return (
-        <div className="space-y-6 animate-fade-in relative">
+        <div className="space-y-6 animate-fade-in relative pb-10">
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-2xl font-bold text-white text-shadow-sm">Financial Performance</h2>
@@ -271,7 +237,7 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
                     <div className="bg-slate-900/60 backdrop-blur-md rounded-xl p-6 border border-white/5 shadow-sm flex flex-col justify-center">
                         <div className="flex items-center gap-2 mb-2">
                              <div className="p-1.5 bg-blue-500/10 text-blue-400 rounded-md">
-                                <PieChart size={16} />
+                                <PieChartIcon size={16} />
                              </div>
                              <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Backend (Est. 25%)</span>
                         </div>
@@ -333,7 +299,7 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-sm text-slate-500">{viewMode === 'PERSONAL' ? 'Avg Case Size' : 'Active Agents'}</p>
-                            <h3 className="text-2xl font-bold text-white mt-1">{viewMode === 'PERSONAL' ? '$1,850' : MOCK_TEAM.length}</h3>
+                            <h3 className="text-2xl font-bold text-white mt-1">{viewMode === 'PERSONAL' ? `$1,850` : MOCK_TEAM.length.toString()}</h3>
                         </div>
                         <div className="p-2 bg-blue-500/10 text-blue-400 rounded-lg">
                             {viewMode === 'PERSONAL' ? <TrendingUp size={20} /> : <Users size={20} />}
@@ -362,14 +328,9 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
                         <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-400"></div> Software: <b>${expenseData.software.toLocaleString()}</b></span>
                         <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-gray-400"></div> Other: <b>${expenseData.licensing.toLocaleString()}</b></span>
                     </div>
-                    <div className="absolute top-2 right-2 text-[10px] text-slate-600 group-hover:text-blue-400 transition-colors">
-                        Click to edit
-                    </div>
                 </div>
 
-                <div 
-                    className="bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm relative group"
-                >
+                <div className="bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm relative group">
                      <div className="flex justify-between items-start">
                         <div>
                             <p className="text-sm text-slate-500">Net Income ({timeFrame})</p>
@@ -395,111 +356,125 @@ const Financial: React.FC<FinancialProps> = ({ clients = [] }) => {
                 </div>
             </div>
 
-            {/* Edit Expenses Modal */}
-            {isExpenseModalOpen && (
-                <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-sm">
-                    <div className="bg-slate-900 rounded-xl shadow-xl w-full max-w-sm ring-1 ring-white/10 animate-fade-in border border-slate-800">
-                        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-xl">
-                            <h3 className="font-bold text-white flex items-center gap-2">
-                                <Briefcase size={16} className="text-blue-500" /> Edit Expenses
-                            </h3>
-                            <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-white">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            
-                            <p className="text-xs text-center text-slate-500 mb-2">
-                                Adjusting <b>{timeFrame}</b> expenses. <br/>
-                            </p>
-                            
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Lead Spend</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-                                    <input 
-                                        type="number"
-                                        className="w-full pl-6 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white bg-slate-950"
-                                        value={tempExpenseData.leads}
-                                        onChange={(e) => setTempExpenseData({...tempExpenseData, leads: Number(e.target.value)})}
-                                    />
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Software & Tools</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-                                    <input 
-                                        type="number"
-                                        className="w-full pl-6 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white bg-slate-950"
-                                        value={tempExpenseData.software}
-                                        onChange={(e) => setTempExpenseData({...tempExpenseData, software: Number(e.target.value)})}
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Licensing & Other</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-                                    <input 
-                                        type="number"
-                                        className="w-full pl-6 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white bg-slate-950"
-                                        value={tempExpenseData.licensing}
-                                        onChange={(e) => setTempExpenseData({...tempExpenseData, licensing: Number(e.target.value)})}
-                                    />
-                                </div>
-                            </div>
-
-                            <button 
-                                onClick={saveExpenses}
-                                className="w-full py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors mt-2 flex items-center justify-center gap-2"
-                            >
-                                <Save size={16} /> Save Expenses
-                            </button>
-                        </div>
+            {/* Carrier Mix & Portfolio Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-bold text-white flex items-center gap-2">
+                            <BarChart3 size={18} className="text-indigo-400" /> Carrier Volume Mix
+                        </h3>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Live Premium by Carrier</span>
                     </div>
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm">
-                    <h3 className="text-lg font-bold text-white mb-6">{viewMode === 'PERSONAL' ? 'Commission Income Trend' : 'Override Volume Trend'}</h3>
-                    <div className="h-72 w-full min-w-0">
+                    <div className="h-80 w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={revenueChartData}>
-                                <defs>
-                                    <linearGradient id="colorComm" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
-                                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v/1000}k`} />
-                                <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.5)', backgroundColor: '#0f172a', color: '#fff'}} />
-                                <Area type="monotone" dataKey="commissions" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorComm)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-                <div className="bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm">
-                    <h3 className="text-lg font-bold text-white mb-6">Product Mix (Premium)</h3>
-                    <div className="h-72 w-full min-w-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={generateProductMix()} layout="vertical">
+                            <BarChart data={carrierVolumeData} layout="vertical" margin={{ left: 40, right: 40 }}>
                                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#1e293b" />
                                 <XAxis type="number" axisLine={false} tickLine={false} hide />
-                                <YAxis dataKey="name" type="category" width={100} axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
-                                <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '8px', border: 'none', backgroundColor: '#0f172a', color: '#fff'}} />
-                                <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={24} />
+                                <YAxis 
+                                    dataKey="name" 
+                                    type="category" 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 'bold'}} 
+                                    width={120}
+                                />
+                                <Tooltip 
+                                    cursor={{fill: 'rgba(255,255,255,0.05)'}} 
+                                    contentStyle={{borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)'}}
+                                    formatter={(v: number) => [`$${v.toLocaleString()}`, 'Premium']}
+                                />
+                                <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
+                                    {carrierVolumeData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    ))}
+                                </Bar>
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
+
+                <div className="bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm flex flex-col">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-bold text-white flex items-center gap-2">
+                            <PieChartIcon size={18} className="text-emerald-400" /> Product Distribution
+                        </h3>
+                    </div>
+                    <div className="flex-1 min-h-[350px]">
+                         {productMixData.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={productMixData}
+                                        innerRadius={70}
+                                        outerRadius={100}
+                                        paddingAngle={5}
+                                        dataKey="value"
+                                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                        labelLine={false}
+                                    >
+                                        {productMixData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="rgba(255,255,255,0.05)" />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip 
+                                        contentStyle={{borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)'}}
+                                        formatter={(v: number) => [`$${v.toLocaleString()}`, 'Premium']}
+                                    />
+                                    <Legend 
+                                        verticalAlign="bottom" 
+                                        align="center" 
+                                        iconType="circle"
+                                        wrapperStyle={{fontSize: '10px', fontWeight: 'bold', paddingTop: '30px'}} 
+                                    />
+                                </PieChart>
+                            </ResponsiveContainer>
+                         ) : (
+                            <div className="h-full flex items-center justify-center text-slate-500 italic text-sm text-center px-6">
+                                No policy data available for this period.
+                            </div>
+                         )}
+                    </div>
+                </div>
             </div>
+
+            <div className="bg-slate-900/60 backdrop-blur-md p-6 rounded-xl border border-white/5 shadow-sm">
+                <h3 className="text-lg font-bold text-white mb-6">{viewMode === 'PERSONAL' ? 'Commission Income Trend' : 'Override Volume Trend'}</h3>
+                <div className="h-72 w-full min-w-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={revenueChartData}>
+                            <defs>
+                                <linearGradient id="colorComm" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                            <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v/1000}k`} />
+                            <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.5)', backgroundColor: '#0f172a', color: '#fff'}} />
+                            <Area type="monotone" dataKey="commissions" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorComm)" />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+
+            {/* Expense Modal */}
+            {isExpenseModalOpen && (
+                <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-sm">
+                    <div className="bg-slate-900 rounded-xl shadow-xl w-full max-w-sm ring-1 ring-white/10 border border-slate-800">
+                        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-xl">
+                            <h3 className="font-bold text-white flex items-center gap-2"><Briefcase size={16} className="text-blue-500" /> Edit Expenses</h3>
+                            <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Lead Spend</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span><input type="number" className="w-full pl-6 pr-3 py-2 border border-slate-700 rounded-lg text-sm bg-slate-950 text-white" value={tempExpenseData.leads} onChange={e => setTempExpenseData({...tempExpenseData, leads: Number(e.target.value)})} /></div></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Software</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span><input type="number" className="w-full pl-6 pr-3 py-2 border border-slate-700 rounded-lg text-sm bg-slate-950 text-white" value={tempExpenseData.software} onChange={e => setTempExpenseData({...tempExpenseData, software: Number(e.target.value)})} /></div></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Licensing</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span><input type="number" className="w-full pl-6 pr-3 py-2 border border-slate-700 rounded-lg text-sm bg-slate-950 text-white" value={tempExpenseData.licensing} onChange={e => setTempExpenseData({...tempExpenseData, licensing: Number(e.target.value)})} /></div></div>
+                            <button onClick={saveExpenses} className="w-full py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors mt-2 flex items-center justify-center gap-2"><Save size={16} /> Save Expenses</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -1,11 +1,8 @@
-
-import { GoogleGenAI, Chat, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Chat, GenerateContentResponse, LiveServerMessage, Modality, Blob } from "@google/genai";
 import { ChatMessage } from "../types";
 
-const API_KEY = process.env.API_KEY || '';
-
-// Initialize client securely - assuming env var is present
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+// Initialize client securely using process.env.API_KEY directly per instructions
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const SYSTEM_INSTRUCTION = `You are "ARISE AI", the advanced intelligent core of the ARISE Financial Systems operating system.
 You serve insurance agents and agency managers. Your goal is to help them build stronger relationships and stay organized using data-driven insights.
@@ -52,7 +49,7 @@ You serve insurance agents and agency managers. Your goal is to help them build 
 
 export const createChatSession = (): Chat => {
   return ai.chats.create({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       thinkingConfig: { thinkingBudget: 0 }, 
@@ -83,7 +80,7 @@ export const sendMessageToGemini = async (
 export const quickSummarize = async (text: string): Promise<string> => {
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: `Summarize the following client notes or policy details into one concise paragraph for an insurance agent CRM:\n\n${text}`
         });
         return response.text || "Could not generate summary.";
@@ -124,7 +121,7 @@ export const parseCommissionDocument = async (base64Data: string, mimeType: stri
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           {
@@ -149,3 +146,78 @@ export const parseCommissionDocument = async (base64Data: string, mimeType: stri
     throw error;
   }
 };
+
+// --- Gemini Live API Helpers for Voice Dojo ---
+
+export const connectToLiveDojo = (callbacks: {
+    onopen?: () => void;
+    onmessage?: (message: LiveServerMessage) => void;
+    onerror?: (e: any) => void;
+    onclose?: (e: CloseEvent) => void;
+}, systemInstruction: string) => {
+    return ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        callbacks,
+        config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+                // Puck provides the most consistent performance for insurance roleplays
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } }
+            },
+            systemInstruction,
+            inputAudioTranscription: { },
+            outputAudioTranscription: { }
+        }
+    });
+};
+
+// Audio Encoding & Decoding Utilities
+export function decodeBase64Audio(base64: string): Uint8Array {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+}
+
+export async function decodeAudioData(
+    data: Uint8Array,
+    ctx: AudioContext,
+    sampleRate: number,
+    numChannels: number,
+): Promise<AudioBuffer> {
+    const dataInt16 = new Int16Array(data.buffer);
+    const frameCount = dataInt16.length / numChannels;
+    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+    for (let channel = 0; channel < numChannels; channel++) {
+        const channelData = buffer.getChannelData(channel);
+        for (let i = 0; i < frameCount; i++) {
+            channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+        }
+    }
+    return buffer;
+}
+
+export function encodeAudio(bytes: Uint8Array): string {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+export function createPcmBlob(data: Float32Array): Blob {
+    const l = data.length;
+    const int16 = new Int16Array(l);
+    for (let i = 0; i < l; i++) {
+        int16[i] = data[i] * 32768;
+    }
+    return {
+        data: encodeAudio(new Uint8Array(int16.buffer)),
+        mimeType: 'audio/pcm;rate=16000',
+    };
+}

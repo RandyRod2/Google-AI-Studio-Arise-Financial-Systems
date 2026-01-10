@@ -1,7 +1,6 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Application, Client, TeamMember } from '../types';
-import { FileText, Filter, Download, CheckCircle, XCircle, MoreHorizontal, Edit2, Trash2, X, Save, Phone, Calendar, Hash, ShieldCheck, DollarSign, Upload, Eye, ChevronDown, Plus } from 'lucide-react';
+import { FileText, Filter, Download, CheckCircle, XCircle, MoreHorizontal, Edit2, Trash2, X, Save, Phone, Calendar, Hash, ShieldCheck, DollarSign, Upload, Eye, ChevronDown, Plus, Volume2 } from 'lucide-react';
 import { calculateCommissionExact, getAvailableCarriers, getAvailableProducts } from '../services/commissionService';
 import { MOCK_TEAM } from '../services/mockData';
 
@@ -30,7 +29,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
         submittedDate: getLocalToday(),
         policyStartDate: getLocalToday()
     });
-    const [monthlyInput, setMonthlyInput] = useState<string>(''); // Local state for monthly input string
+    const [monthlyInput, setMonthlyInput] = useState<string>(''); 
     
     // Dynamic Carrier/Product options
     const [carrierOptions, setCarrierOptions] = useState<string[]>([]);
@@ -38,8 +37,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Current User / Agent (Mocked for now, in real app would come from context)
-    // We'll use the first user in MOCK_TEAM as the "current user" to determine comp level
     const [currentUser] = useState<TeamMember>(() => {
         try {
             const saved = localStorage.getItem('arise_team_members');
@@ -51,7 +48,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
         setCarrierOptions(getAvailableCarriers());
     }, []);
 
-    // Update product options when carrier changes
     useEffect(() => {
         if (newApp.carrier) {
             setProductOptions(getAvailableProducts(newApp.carrier));
@@ -64,6 +60,17 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
         }
     }, [editingApp?.carrier]);
 
+    const triggerVictoryBell = (agentName: string, amount: number, carrier: string) => {
+        const event = new CustomEvent('arise-sales-win', {
+            detail: {
+                agentName: agentName || 'An Agent',
+                amount: `$${amount.toLocaleString()}`,
+                carrier: carrier
+            }
+        });
+        window.dispatchEvent(event);
+    };
+
     const handleEditClick = (app: Application) => {
         setEditingApp({ ...app });
         setIsEditModalOpen(true);
@@ -71,12 +78,18 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
 
     const handleSave = () => {
         if (editingApp) {
-            // Sanitize inputs to ensure no NaN values are saved
             const finalApp = {
                 ...editingApp,
                 premium: isNaN(editingApp.premium) ? 0 : editingApp.premium,
                 coverageAmount: editingApp.coverageAmount && isNaN(editingApp.coverageAmount) ? 0 : editingApp.coverageAmount
             };
+            
+            // Check if status JUST changed to issued
+            const oldApp = applications.find(a => a.id === editingApp.id);
+            if (oldApp && oldApp.status !== 'Issued' && finalApp.status === 'Issued') {
+                triggerVictoryBell(currentUser.name, finalApp.premium, finalApp.carrier);
+            }
+
             onUpdateApplication(finalApp);
             setIsEditModalOpen(false);
             setEditingApp(null);
@@ -96,7 +109,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
     const handleAdd = () => {
         if (!newApp.clientId || !newApp.carrier || !newApp.product) return;
         
-        // Find client name for display optimization (though data model ideally just uses ID)
         const client = clients.find(c => c.id === newApp.clientId);
     
         const app: Application = {
@@ -114,6 +126,10 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
             notes: newApp.notes || ''
         };
         
+        if (app.status === 'Issued') {
+            triggerVictoryBell(currentUser.name, app.premium, app.carrier);
+        }
+
         onAddApplication(app);
         setIsAddModalOpen(false);
         setNewApp({ status: 'Submitted', submittedDate: getLocalToday() });
@@ -121,6 +137,9 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
     };
 
     const handleStatusChange = (app: Application, newStatus: Application['status']) => {
+        if (app.status !== 'Issued' && newStatus === 'Issued') {
+            triggerVictoryBell(currentUser.name, app.premium, app.carrier);
+        }
         onUpdateApplication({ ...app, status: newStatus });
     };
 
@@ -134,8 +153,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
             reader.readAsDataURL(file);
         }
     };
-
-    // --- Auto-Calculation Handlers ---
     
     const handleMonthlyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
@@ -162,15 +179,12 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
         return clients.find(c => c.id === clientId);
     };
 
-    // Helper calculations for modal
     const calculateMetrics = () => {
         if (!editingApp) return { monthly: 0, commPercent: 0, advance: 0, backend: 0, totalComm: 0 };
         const premium = isNaN(editingApp.premium) ? 0 : editingApp.premium;
         const monthly = premium / 12;
         
-        // --- DYNAMIC COMMISSION CALCULATION ---
         const carrier = editingApp.carrier;
-        // Determine Comp Level: Use Carrier Override if exists, else Default
         const compLevel = currentUser.carrierCompLevels?.[carrier] || currentUser.defaultCompLevel;
         
         const commData = calculateCommissionExact(carrier, editingApp.product, premium, compLevel);
@@ -198,14 +212,13 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                      </button>
                      <button 
                         onClick={openAddModal}
-                        className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium shadow-sm transition-colors"
+                        className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium shadow-sm transition-colors"
                      >
                         <Plus size={16} /> Add Application
                      </button>
                 </div>
             </div>
 
-            {/* ... rest of the component (render logic unchanged except default values) ... */}
             <div className="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
                 <table className="w-full text-left border-collapse">
                     <thead>
@@ -313,7 +326,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                 </select>
                             </div>
 
-                            {/* ... (Existing form fields for carrier, product, premium, etc.) ... */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Carrier</label>
@@ -474,7 +486,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                             <button 
                                 onClick={handleAdd}
                                 disabled={!newApp.clientId || !newApp.carrier}
-                                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <Plus size={16} /> Create Application
                             </button>
@@ -487,7 +499,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
             {isEditModalOpen && editingApp && (
                 <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-md">
                     <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-2xl animate-fade-in ring-1 ring-white/10 flex flex-col max-h-[90vh]">
-                        {/* Header */}
                         <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-xl shrink-0">
                              <div>
                                 <h3 className="font-bold text-xl text-white">{editingApp.clientName}</h3>
@@ -499,9 +510,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                         </div>
                         
                         <div className="overflow-y-auto p-6 space-y-6">
-                            {/* ... (Existing read-only or quick-edit fields) ... */}
                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                {/* ... Phone, Status, etc. ... */}
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-500 uppercase">Phone</label>
                                     <div className="text-sm font-semibold text-white flex items-center gap-2">
@@ -532,7 +541,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-500 uppercase">Submitted</label>
-                                    {/* Editable Submitted Date */}
                                     <div className="text-sm font-semibold text-white flex items-center gap-2">
                                         <Calendar size={14} className="text-slate-500"/>
                                         <input 
@@ -559,7 +567,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
 
                             <hr className="border-slate-800" />
 
-                             {/* Policy Details Section */}
                             <div>
                                 <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                                     <FileText size={16} className="text-blue-500" /> Application Details
@@ -650,7 +657,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
 
                             <hr className="border-slate-800" />
                             
-                            {/* ... (Document Upload Section remains same) ... */}
                             <div>
                                 <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                                     <FileText size={16} className="text-blue-500" /> Document Upload
@@ -705,7 +711,6 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
 
                             <hr className="border-slate-800" />
 
-                             {/* Commission Breakdown Section (Estimates) */}
                              <div>
                                 <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                                     <DollarSign size={16} className="text-green-400" /> Projected Commission
@@ -772,7 +777,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                             </button>
                             <button 
                                 onClick={handleSave}
-                                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50"
+                                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50"
                             >
                                 <Save size={16} /> Save Changes
                             </button>

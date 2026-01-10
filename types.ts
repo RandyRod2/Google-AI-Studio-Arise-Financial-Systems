@@ -31,26 +31,28 @@ export enum PipelineStage {
   APPLICATION_TAKEN = 'Application Approved',
   UNDERWRITING = 'Underwriting',
   ISSUED = 'Issued',
+  RENEWAL_REVIEW = 'Renewal Review',
   NOT_INTERESTED = 'Not Interested',
   BAD_NUMBER = 'Bad Number'
 }
 
 export interface Policy {
   id: string;
-  applicationId?: string; // ID of the application that generated this policy
+  applicationId?: string;
   type: PolicyType;
-  productName?: string; // Specific product name
+  productName?: string;
   policyNumber: string;
   carrier: string;
-  premium: number; // Annual Premium
-  coverageAmount: number; // Face Amount
+  premium: number;
+  coverageAmount: number;
   commission: number;
   startDate: string;
-  submittedDate?: string; // Date the application was submitted
+  submittedDate?: string;
+  draftDate?: string;
   endDate: string;
   status: PolicyStatus;
   isPaidOut?: boolean;
-  documentUrl?: string; // URL/Base64 of the original application document
+  documentUrl?: string;
 }
 
 export interface Client {
@@ -67,7 +69,7 @@ export interface Client {
   avatarUrl?: string;
   pipelineStage: PipelineStage;
   leadSource: string;
-  leadType?: 'FEX' | 'MP' | 'IUL' | 'VET'; // Added specific lead type
+  leadType?: 'FEX' | 'MP' | 'IUL' | 'VET';
   lastContactDate: string;
 }
 
@@ -77,26 +79,35 @@ export interface Application {
   clientName: string;
   carrier: string;
   product: string;
-  policyNumber?: string; // Added field
+  policyNumber?: string;
   submittedDate: string;
-  policyStartDate?: string; // Effective Date requested/issued
+  policyStartDate?: string;
   premium: number;
   coverageAmount?: number;
   status: 'Submitted' | 'Underwriting' | 'Approved' | 'Issued' | 'Declined';
   notes: string;
-  documentUrl?: string; // URL/Base64 of the uploaded application document
+  documentUrl?: string;
+}
+
+export interface Badge {
+  icon: string;
+  label: string;
+  color: string;
+  description?: string;
 }
 
 export interface TeamMember {
   id: string;
+  parentId?: string;
   name: string;
   email: string;
   role: Role;
   production: number;
   activePolicies: number;
   avatarUrl: string;
-  defaultCompLevel: number; // e.g. 100
-  carrierCompLevels?: Record<string, number>; // { 'Aetna': 110 }
+  defaultCompLevel: number;
+  carrierCompLevels?: Record<string, number>;
+  badges?: Badge[];
 }
 
 export interface Recruit {
@@ -120,7 +131,6 @@ export interface User {
   npn?: string;
 }
 
-// Extended interface for Super Admin view
 export interface SaaSUser extends User {
   status: SubscriptionStatus;
   plan: SubscriptionPlan;
@@ -157,15 +167,34 @@ export interface StatCardProps {
   subtitle?: string;
 }
 
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  date: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  author: string;
+}
+
+export interface CalendarEvent {
+    id: string;
+    title: string;
+    date: string; // YYYY-MM-DD
+    type: string;
+    time?: string;
+    isGlobal?: boolean;
+}
+
 export type ViewState = 
   | 'DASHBOARD' 
   | 'MANAGER_DASHBOARD'
   | 'PLATFORM_ADMIN' 
+  | 'SECURITY_AUDIT'
   | 'QUOTER' 
   | 'LEAD_STORE'
   | 'THE_DOJO'
   | 'CARRIERS' 
-  | 'PRODUCT_COMMISSION' // New View
+  | 'PRODUCT_COMMISSION'
   | 'CLIENTS' 
   | 'BOOK_OF_BUSINESS'
   | 'PIPELINE' 
@@ -203,21 +232,105 @@ export interface UserProfile {
   npn?: string;
 }
 
+// --- Audit System Types ---
+
+export interface AuditLog {
+    id: string;
+    timestamp: string;
+    actorId: string;
+    actorName: string;
+    actorRole: Role;
+    action: string;
+    entity: string;
+    details: string;
+    riskScore: number; // 0-10
+}
+
 // --- Commission Engine Types ---
 
 export interface CommissionRule {
-  fyc: number; // First Year Commission Rate (e.g. 0.90)
-  renewals: number; // Renewal Rate (e.g. 0.05)
-  excess?: number; // Excess Rate for IULs
-  advanceMonths?: number; // From File 2
-  advanceCap?: number; // From File 2
+  fyc: number;
+  renewals: number;
+  excess?: number;
+  advanceMonths?: number;
+  advanceCap?: number;
 }
 
-// Map: Carrier -> Product -> Level (as string '70', '80', etc) -> Rule
 export interface CommissionRegistry {
   [carrier: string]: {
     [product: string]: {
       [level: string]: CommissionRule;
     };
   };
+}
+
+// --- Dojo Types ---
+export interface DojoMoment {
+    text: string;
+    suggestion: string;
+    type: 'CRITIQUE' | 'WIN';
+    timestamp: string;
+    segmentIndex?: number;
+}
+
+export interface DojoGoldenRebuttals {
+    objection: string;
+    userResponse: string;
+    eliteResponse: string;
+    bridgeName: string;
+}
+
+export interface DojoScorecard {
+    overall: number;
+    rapport: number;
+    qualifying: number;
+    objectionHandling: number;
+    closing: number;
+    tonalityScore?: number;
+    pacingScore?: number;
+    feedback: string;
+    strengths: string[];
+    improvements: string[];
+    moments: DojoMoment[];
+    goldenRebuttals: DojoGoldenRebuttals[];
+    controlTimeline: number[];
+    transcriptSegments: string[];
+}
+
+// --- Competitive Update Types ---
+
+export interface Duel {
+    id: string;
+    category: 'AGENT' | 'AGENCY';
+    competitor1Id: string;
+    competitor2Id: string;
+    competitor1Name?: string;
+    competitor2Name?: string;
+    type: 'APPS' | 'PREMIUM';
+    target: number;
+    current1: number;
+    current2: number;
+    status: 'ACTIVE' | 'FINISHED';
+}
+
+// --- Revenue Forecast Types ---
+
+export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'AT_RISK';
+
+export interface ForecastPeriod {
+  label: string;
+  days: number;
+  projectedPremium: number;
+  confidence: ConfidenceBand;
+  composition: {
+    settled: number;
+    weighted: number;
+    velocity: number;
+  };
+}
+
+export interface RevenueForecast {
+  d7: ForecastPeriod;
+  d30: ForecastPeriod;
+  d90: ForecastPeriod;
 }

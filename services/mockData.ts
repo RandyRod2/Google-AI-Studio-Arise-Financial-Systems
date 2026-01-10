@@ -1,5 +1,5 @@
 
-import { Client, PolicyType, PolicyStatus, PipelineStage, Application, TeamMember, User, ActivityItem, Referral, SaaSUser, SubscriptionStatus, SubscriptionPlan, CommissionRegistry } from '../types';
+import { Client, PolicyType, PolicyStatus, PipelineStage, Application, TeamMember, User, ActivityItem, Referral, SaaSUser, SubscriptionStatus, SubscriptionPlan, CommissionRegistry, Announcement } from '../types';
 
 export const MOCK_USERS: User[] = [
   {
@@ -15,6 +15,33 @@ export const MOCK_USERS: User[] = [
     email: 'sarah@arise.com',
     role: 'MANAGER',
     avatarUrl: 'https://picsum.photos/100/100?random=100'
+  }
+];
+
+export const MOCK_ANNOUNCEMENTS: Announcement[] = [
+  {
+    id: 'ann-1',
+    title: 'New Carrier Integration Live!',
+    content: 'We are excited to announce that Ethos Life is now fully integrated into the ARISE Smart Quoter and Pipeline.',
+    date: '2024-10-20',
+    priority: 'HIGH',
+    author: 'Randy Rodriguez'
+  },
+  {
+    id: 'ann-2',
+    title: 'Office Closed: Memorial Day',
+    content: 'The HQ office will be closed this coming Monday. Support responses may be delayed.',
+    date: '2024-10-18',
+    priority: 'MEDIUM',
+    author: 'Sarah Manager'
+  },
+  {
+    id: 'ann-3',
+    title: 'New Compliance Guidelines for Q4',
+    content: 'Please review the updated AML training modules in the University tab before Oct 31st.',
+    date: '2024-10-15',
+    priority: 'URGENT',
+    author: 'System'
   }
 ];
 
@@ -343,11 +370,38 @@ export const MOCK_APPLICATIONS: Application[] = [
 ];
 
 export const MOCK_TEAM: TeamMember[] = [
-    { id: 't1', name: 'Randy Rodriguez', email: 'randy@arise.com', role: 'ADMIN', production: 145000, activePolicies: 124, avatarUrl: 'https://picsum.photos/100/100?random=99', defaultCompLevel: 120 },
-    { id: 't2', name: 'Dwight Schrute', email: 'dwight@arise.com', role: 'AGENCY_OWNER', production: 89000, activePolicies: 88, avatarUrl: 'https://picsum.photos/100/100?random=12', defaultCompLevel: 110 },
-    { id: 't3', name: 'Jim Halpert', email: 'jim@arise.com', role: 'MANAGER', production: 72000, activePolicies: 65, avatarUrl: 'https://picsum.photos/100/100?random=13', defaultCompLevel: 100 },
-    { id: 't4', name: 'Pam Beesly', email: 'pam@arise.com', role: 'AGENT', production: 45000, activePolicies: 42, avatarUrl: 'https://picsum.photos/100/100?random=14', defaultCompLevel: 90 },
-    { id: 't5', name: 'Ryan Howard', email: 'ryan@arise.com', role: 'RECRUIT', production: 12000, activePolicies: 15, avatarUrl: 'https://picsum.photos/100/100?random=15', defaultCompLevel: 70 }
+    { 
+        id: 't1', 
+        name: 'Randy Rodriguez', 
+        email: 'randy@arise.com', 
+        role: 'ADMIN', 
+        production: 145000, 
+        activePolicies: 124, 
+        avatarUrl: 'https://picsum.photos/100/100?random=99', 
+        defaultCompLevel: 120,
+        badges: [
+            { icon: '🏆', label: 'Agency MVP', color: 'indigo', description: 'Highest production for 3 consecutive months' },
+            { icon: '🔥', label: 'On Fire', color: 'orange', description: 'Issued 5+ policies in the last 7 days' },
+            { icon: '🎓', label: 'IUL Master', color: 'blue', description: 'Certified advanced IUL strategist' }
+        ]
+    },
+    { 
+        id: 't2', 
+        name: 'Dwight Schrute', 
+        email: 'dwight@arise.com', 
+        role: 'AGENCY_OWNER', 
+        production: 89000, 
+        activePolicies: 88, 
+        avatarUrl: 'https://picsum.photos/100/100?random=12', 
+        defaultCompLevel: 110,
+        badges: [
+            { icon: '⚔️', label: 'Duel Master', color: 'red', description: 'Won 10+ Arena Duels' },
+            { icon: '💼', label: 'Top Recruiter', color: 'green', description: 'Built a leg of 10+ active agents' }
+        ]
+    },
+    { id: 't3', name: 'Jim Halpert', email: 'jim@arise.com', role: 'MANAGER', production: 72000, activePolicies: 65, avatarUrl: 'https://picsum.photos/100/100?random=13', defaultCompLevel: 100, badges: [{ icon: '🤝', label: 'Rapport King', color: 'emerald', description: '95% customer satisfaction rating' }] },
+    { id: 't4', name: 'Pam Beesly', email: 'pam@arise.com', role: 'AGENT', production: 45000, activePolicies: 42, avatarUrl: 'https://picsum.photos/100/100?random=14', defaultCompLevel: 90, badges: [{ icon: '🌟', label: 'Rising Star', color: 'amber', description: 'Fastest growing rookie agent' }] },
+    { id: 't5', name: 'Ryan Howard', email: 'ryan@arise.com', role: 'RECRUIT', production: 12000, activePolicies: 15, avatarUrl: 'https://picsum.photos/100/100?random=15', defaultCompLevel: 70, badges: [] }
 ];
 
 export const MOCK_TASKS = [

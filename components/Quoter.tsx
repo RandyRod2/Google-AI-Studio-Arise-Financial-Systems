@@ -129,8 +129,8 @@ const Quoter: React.FC = () => {
 
         // 1. Manually add Aetna/CVS (as requested) if not present or as override
         plans.push(
-            { id: 'aetna_cvs', carrierName: 'Aetna / CVS', planName: 'Ascent', minAge: 40, maxAge: 89, baseRate: 3.1, policyFee: 40, type: 'LEVEL', logoColor: 'bg-red-600' },
-            { id: 'aetna_mod', carrierName: 'Aetna / CVS', planName: 'Ascent Modified', minAge: 40, maxAge: 75, baseRate: 6.2, policyFee: 40, type: 'MODIFIED', logoColor: 'bg-red-600' }
+            { id: 'aetna_cvs', carrierName: 'Aetna / CVS', planName: 'Accendo', minAge: 40, maxAge: 89, baseRate: 3.1, policyFee: 40, type: 'LEVEL', logoColor: 'bg-red-600' },
+            { id: 'aetna_mod', carrierName: 'Aetna / CVS', planName: 'Accendo Modified', minAge: 40, maxAge: 75, baseRate: 6.2, policyFee: 40, type: 'MODIFIED', logoColor: 'bg-red-600' }
         );
 
         // 2. Generate plans from Registry

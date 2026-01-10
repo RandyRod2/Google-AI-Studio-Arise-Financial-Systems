@@ -1,20 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Clock, MapPin, AlertCircle, CheckSquare, Plus, X, Calendar as CalendarIcon, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, MapPin, AlertCircle, CheckSquare, Plus, X, Calendar as CalendarIcon, Trash2, Users, Save, Edit2 } from 'lucide-react';
 import { MOCK_TASKS, MOCK_COMPLIANCE } from '../services/mockData';
+import { CalendarEvent, User } from '../types';
 
-interface CalendarEvent {
-    id: string;
-    title: string;
-    date: string; // YYYY-MM-DD
-    type: string;
-    time?: string;
+interface CalendarProps {
+    currentUser?: User;
 }
 
-const Calendar: React.FC = () => {
+const Calendar: React.FC<CalendarProps> = ({ currentUser }) => {
     // State for Date Navigation
     const [currentDate, setCurrentDate] = useState(new Date());
     
+    const canManageGlobal = currentUser && ['ADMIN', 'AGENCY_OWNER', 'STAFF'].includes(currentUser.role);
+
     // Initialize Events from Local Storage or Mock Data
     const [events, setEvents] = useState<CalendarEvent[]>(() => {
         try {
@@ -26,7 +25,7 @@ const Calendar: React.FC = () => {
             console.error("Error loading calendar events", e);
         }
 
-        // Default Initialization (Run once if no save found)
+        // Default Initialization
         const today = new Date();
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -38,7 +37,6 @@ const Calendar: React.FC = () => {
             } else if (t.dueDate === 'Tomorrow') {
                 dateStr = tomorrow.toISOString().split('T')[0];
             } else if (t.dueDate.includes('Oct')) {
-                // Approximate for demo if static date provided
                 dateStr = `2024-10-${t.dueDate.split(' ')[1]}`;
             } else {
                 dateStr = today.toISOString().split('T')[0];
@@ -49,8 +47,23 @@ const Calendar: React.FC = () => {
                 title: t.title,
                 date: dateStr,
                 type: t.type,
-                time: '10:00'
+                time: '10:00',
+                isGlobal: false
             };
+        });
+
+        // Add some mock global training events
+        const nextWed = new Date(today);
+        nextWed.setDate(today.getDate() + (3 - today.getDay() + 7) % 7);
+        const nextWedStr = nextWed.toISOString().split('T')[0];
+
+        initialEvents.push({
+            id: 'team-training-1',
+            title: 'Team Workshop: Advanced IUL',
+            date: nextWedStr,
+            time: '14:00',
+            type: 'Training',
+            isGlobal: true
         });
 
         MOCK_COMPLIANCE.forEach(c => {
@@ -60,7 +73,8 @@ const Calendar: React.FC = () => {
                      title: `Expiring: ${c.name}`,
                      date: c.expiry,
                      type: 'Compliance',
-                     time: '00:00'
+                     time: '00:00',
+                     isGlobal: false
                  });
              }
         });
@@ -70,11 +84,13 @@ const Calendar: React.FC = () => {
     
     // State for Modal
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [newEvent, setNewEvent] = useState({ 
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [formState, setFormState] = useState({ 
         title: '', 
         date: new Date().toISOString().split('T')[0], 
         time: '09:00',
-        type: 'Meeting' 
+        type: 'Meeting',
+        isGlobal: false
     });
 
     // Persist events whenever they change
@@ -95,61 +111,80 @@ const Calendar: React.FC = () => {
     };
 
     const handleCreateEvent = () => {
-        if (!newEvent.title || !newEvent.date) return;
+        if (!formState.title || !formState.date) return;
 
-        const event: CalendarEvent = {
-            id: Date.now().toString(),
-            title: newEvent.title,
-            date: newEvent.date,
-            type: newEvent.type,
-            time: newEvent.time
-        };
-
-        setEvents([...events, event]);
+        if (editingId) {
+            setEvents(events.map(ev => ev.id === editingId ? {
+                ...ev,
+                title: formState.title,
+                date: formState.date,
+                type: formState.type,
+                time: formState.time,
+                isGlobal: formState.isGlobal
+            } : ev));
+            setEditingId(null);
+        } else {
+            const event: CalendarEvent = {
+                id: Date.now().toString(),
+                title: formState.title,
+                date: formState.date,
+                type: formState.type,
+                time: formState.time,
+                isGlobal: formState.isGlobal
+            };
+            setEvents([...events, event]);
+        }
+        
         setIsAddModalOpen(false);
-        // Reset form but keep date for convenience if adding multiple
-        setNewEvent(prev => ({ 
-            ...prev,
+        setFormState({ 
             title: '', 
-            time: '09:00',
-            type: 'Meeting' 
-        }));
+            date: new Date().toISOString().split('T')[0],
+            time: '09:00', 
+            type: 'Meeting',
+            isGlobal: false
+        });
     };
 
-    const handleDeleteEvent = (id: string, e: React.MouseEvent) => {
+    const handleEditEvent = (ev: CalendarEvent, e: React.MouseEvent) => {
         e.stopPropagation();
+        if (ev.isGlobal && !canManageGlobal) {
+            alert("Only admins/staff can edit Team Events.");
+            return;
+        }
+        setEditingId(ev.id);
+        setFormState({
+            title: ev.title,
+            date: ev.date,
+            time: ev.time || '09:00',
+            type: ev.type || 'Meeting',
+            isGlobal: !!ev.isGlobal
+        });
+        setIsAddModalOpen(true);
+    };
+
+    const handleDeleteEvent = (id: string, isGlobal: boolean | undefined, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (isGlobal && !canManageGlobal) {
+            alert("Only admins/staff can delete Team Events.");
+            return;
+        }
         if (window.confirm("Delete this event?")) {
             setEvents(events.filter(ev => ev.id !== id));
         }
     };
 
-    // Helper to generate the grid days
     const getCalendarDays = () => {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth();
-        
-        const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 = Sun
+        const firstDayOfMonth = new Date(year, month, 1).getDay();
         const daysInMonth = new Date(year, month + 1, 0).getDate();
-        
         const calendarGrid = [];
-        
-        // Previous month padding
-        for (let i = 0; i < firstDayOfMonth; i++) {
-            calendarGrid.push(null);
-        }
-        
-        // Current month days
+        for (let i = 0; i < firstDayOfMonth; i++) calendarGrid.push(null);
         for (let i = 1; i <= daysInMonth; i++) {
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
             calendarGrid.push({ day: i, dateStr });
         }
-
-        // Fill remaining cells to maintain grid structure (6 rows max usually cover all months)
-        const totalCells = 42; 
-        while (calendarGrid.length < totalCells) {
-            calendarGrid.push(null);
-        }
-
+        while (calendarGrid.length < 42) calendarGrid.push(null);
         return calendarGrid;
     };
 
@@ -157,14 +192,13 @@ const Calendar: React.FC = () => {
     const monthName = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // Filter events for the side list (Upcoming from today onwards)
     const upcomingEvents = events
         .filter(e => e.date >= todayStr)
         .sort((a, b) => {
             if (a.date === b.date) return (a.time || '').localeCompare(b.time || '');
             return a.date.localeCompare(b.date);
         })
-        .slice(0, 5);
+        .slice(0, 10);
 
     return (
         <div className="animate-fade-in space-y-6 relative h-full flex flex-col">
@@ -195,7 +229,7 @@ const Calendar: React.FC = () => {
                     </div>
                     
                     <button 
-                        onClick={() => setIsAddModalOpen(true)}
+                        onClick={() => { setIsAddModalOpen(true); setEditingId(null); setFormState({title:'', date: todayStr, time:'09:00', type:'Meeting', isGlobal:false}); }}
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors shadow-sm"
                     >
                         <Plus size={18} /> <span className="hidden sm:inline">Add Event</span>
@@ -229,33 +263,46 @@ const Calendar: React.FC = () => {
                                         <span className={`text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full ${isToday ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400'}`}>
                                             {cell.day}
                                         </span>
-                                        {dayEvents.length > 0 && (
-                                            <span className="text-[10px] text-slate-600 font-medium hidden sm:inline">{dayEvents.length} items</span>
-                                        )}
                                     </div>
                                     
                                     <div className="flex-1 flex flex-col gap-1 overflow-y-auto mt-1 custom-scrollbar">
-                                        {dayEvents.map(event => (
-                                            <div 
-                                                key={event.id} 
-                                                className={`group px-2 py-1 text-[10px] rounded border-l-2 truncate font-medium cursor-pointer transition-all hover:opacity-100 opacity-90 relative
-                                                ${event.type === 'Meeting' ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500' : 
-                                                  event.type === 'Call' ? 'bg-green-900/30 text-green-400 border-green-500' : 
-                                                  event.type === 'Compliance' ? 'bg-red-900/30 text-red-400 border-red-500' :
-                                                  'bg-slate-800 text-slate-300 border-slate-600'}`}
-                                                title={event.title}
-                                            >
-                                                {event.time && event.time !== '00:00' ? <span className="opacity-75 mr-1">{event.time}</span> : ''}
-                                                {event.title}
-                                                
-                                                <button 
-                                                    onClick={(e) => handleDeleteEvent(event.id, e)}
-                                                    className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:block p-0.5 bg-slate-900/50 rounded hover:bg-slate-900 text-red-400"
+                                        {dayEvents.map(event => {
+                                            const canEditEvent = !event.isGlobal || canManageGlobal;
+                                            return (
+                                                <div 
+                                                    key={event.id} 
+                                                    onClick={(e) => handleEditEvent(event, e)}
+                                                    className={`group px-2 py-1 text-[10px] rounded border-l-2 truncate font-medium cursor-pointer transition-all hover:opacity-100 opacity-90 relative
+                                                    ${event.isGlobal ? 'bg-purple-900/30 text-purple-300 border-purple-500' : 
+                                                    event.type === 'Meeting' ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500' : 
+                                                    event.type === 'Call' ? 'bg-green-900/30 text-green-400 border-green-500' : 
+                                                    event.type === 'Compliance' ? 'bg-red-900/30 text-red-400 border-red-500' :
+                                                    'bg-slate-800 text-slate-300 border-slate-600'}`}
+                                                    title={event.title}
                                                 >
-                                                    <Trash2 size={10} />
-                                                </button>
-                                            </div>
-                                        ))}
+                                                    {event.isGlobal && <Users size={8} className="inline mr-1" />}
+                                                    {event.time && event.time !== '00:00' ? <span className="opacity-75 mr-1">{event.time}</span> : ''}
+                                                    {event.title}
+                                                    
+                                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1">
+                                                        {canEditEvent && (
+                                                            <button 
+                                                                onClick={(e) => handleEditEvent(event, e)}
+                                                                className={`p-0.5 bg-slate-900/80 rounded hover:bg-slate-900 text-indigo-400`}
+                                                            >
+                                                                <Edit2 size={10} />
+                                                            </button>
+                                                        )}
+                                                        <button 
+                                                            onClick={(e) => handleDeleteEvent(event.id, event.isGlobal, e)}
+                                                            className={`p-0.5 bg-slate-900/80 rounded hover:bg-slate-900 text-red-400`}
+                                                        >
+                                                            <Trash2 size={10} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             );
@@ -267,65 +314,81 @@ const Calendar: React.FC = () => {
                 <div className="space-y-6 overflow-y-auto custom-scrollbar lg:h-auto">
                      <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-sm">
                         <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                            <Clock size={16} className="text-indigo-500" /> Upcoming
+                            <Clock size={16} className="text-indigo-500" /> Upcoming Schedule
                         </h3>
                         <div className="space-y-3">
                             {upcomingEvents.length === 0 ? (
                                 <p className="text-sm text-slate-500 italic">No upcoming events scheduled.</p>
-                            ) : upcomingEvents.map(event => (
-                                <div key={event.id} className={`border-l-4 pl-3 py-1 relative group ${event.type === 'Meeting' ? 'border-indigo-500' : event.type === 'Call' ? 'border-green-500' : 'border-slate-600'}`}>
-                                    <div className="flex justify-between items-start">
-                                        <p className="text-sm font-bold text-slate-200 line-clamp-1">{event.title}</p>
-                                        <button 
-                                            onClick={(e) => handleDeleteEvent(event.id, e)}
-                                            className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-opacity"
-                                        >
-                                            <Trash2 size={12} />
-                                        </button>
+                            ) : upcomingEvents.map(event => {
+                                const canEditEvent = !event.isGlobal || canManageGlobal;
+                                return (
+                                    <div key={event.id} className={`border-l-4 pl-3 py-1 relative group ${event.isGlobal ? 'border-purple-500' : event.type === 'Meeting' ? 'border-indigo-500' : event.type === 'Call' ? 'border-green-500' : 'border-slate-600'}`}>
+                                        <div className="flex justify-between items-start">
+                                            <p className="text-sm font-bold text-slate-200 line-clamp-1">{event.title}</p>
+                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                {canEditEvent && (
+                                                    <button 
+                                                        onClick={(e) => handleEditEvent(event, e)}
+                                                        className="text-slate-500 hover:text-indigo-400"
+                                                    >
+                                                        <Edit2 size={12} />
+                                                    </button>
+                                                )}
+                                                <button 
+                                                    onClick={(e) => handleDeleteEvent(event.id, event.isGlobal, e)}
+                                                    className="text-slate-500 hover:text-red-400"
+                                                >
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+                                            <span className="flex items-center gap-1 font-medium text-slate-400">
+                                                {event.date === todayStr ? 'Today' : new Date(event.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
+                                            </span>
+                                            <span className={`flex items-center gap-1 font-bold ${event.isGlobal ? 'text-purple-400' : ''}`}>
+                                                {event.isGlobal ? <Users size={12} /> : event.type === 'Meeting' ? <MapPin size={12} /> : <CheckSquare size={12} />} 
+                                                {event.isGlobal ? 'TEAM' : event.type}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                                        <span className="flex items-center gap-1 font-medium text-slate-400">
-                                            {event.date === todayStr ? 'Today' : new Date(event.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
-                                        </span>
-                                        <span className="flex items-center gap-1">
-                                            {event.type === 'Meeting' ? <MapPin size={12} /> : event.type === 'Call' ? <CheckSquare size={12} /> : <AlertCircle size={12} />} 
-                                            {event.type}
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
-                     </div>
-                     
-                     <div className="bg-orange-900/10 p-5 rounded-xl border border-orange-900/30">
-                        <h3 className="font-bold text-orange-400 mb-2 flex items-center gap-2">
-                            <AlertCircle size={16}/> Compliance Watch
-                        </h3>
-                        {events.filter(e => e.type === 'Compliance').slice(0, 3).map(c => (
-                            <div key={c.id} className="text-xs text-orange-300 mb-2 pb-2 border-b border-orange-900/30 last:border-0 last:pb-0 last:mb-0">
-                                <b>{c.title}</b> due on {c.date}.
-                            </div>
-                        ))}
-                        {events.filter(e => e.type === 'Compliance').length === 0 && (
-                            <p className="text-xs text-orange-700 opacity-70">No compliance alerts for this period.</p>
-                        )}
                      </div>
                 </div>
             </div>
 
-            {/* Create Event Modal */}
+            {/* Create / Edit Event Modal */}
             {isAddModalOpen && (
                 <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-md">
                     <div className="bg-slate-900 rounded-xl shadow-xl w-full max-w-md ring-1 ring-white/10 animate-fade-in border border-slate-800">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-xl">
                             <h3 className="font-bold text-white flex items-center gap-2">
-                                <CalendarIcon size={18} className="text-indigo-500" /> New Event
+                                <CalendarIcon size={18} className="text-indigo-500" /> {editingId ? 'Edit Event' : 'New Event'}
                             </h3>
                             <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-white transition-colors">
                                 <X size={20} />
                             </button>
                         </div>
                         <div className="p-6 space-y-4">
+                            {canManageGlobal && (
+                                <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20 mb-2">
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                                            checked={formState.isGlobal}
+                                            onChange={e => setFormState({...formState, isGlobal: e.target.checked})}
+                                        />
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-bold text-indigo-300">Team Announcement / Global Event</span>
+                                            <span className="text-[10px] text-slate-500">Visible to all agents in the agency.</span>
+                                        </div>
+                                    </label>
+                                </div>
+                            )}
+
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Event Title</label>
                                 <input 
@@ -333,8 +396,8 @@ const Calendar: React.FC = () => {
                                     autoFocus
                                     className="w-full px-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
                                     placeholder="e.g. Client Review with John"
-                                    value={newEvent.title}
-                                    onChange={(e) => setNewEvent({...newEvent, title: e.target.value})}
+                                    value={formState.title}
+                                    onChange={(e) => setFormState({...formState, title: e.target.value})}
                                 />
                             </div>
                             
@@ -344,8 +407,8 @@ const Calendar: React.FC = () => {
                                     <input 
                                         type="date"
                                         className="w-full px-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
-                                        value={newEvent.date}
-                                        onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
+                                        value={formState.date}
+                                        onChange={(e) => setFormState({...formState, date: e.target.value})}
                                     />
                                 </div>
                                 <div>
@@ -353,32 +416,34 @@ const Calendar: React.FC = () => {
                                     <input 
                                         type="time"
                                         className="w-full px-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
-                                        value={newEvent.time}
-                                        onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
+                                        value={formState.time}
+                                        onChange={(e) => setFormState({...formState, time: e.target.value})}
                                     />
                                 </div>
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Event Type</label>
-                                <select
-                                    className="w-full px-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
-                                    value={newEvent.type}
-                                    onChange={(e) => setNewEvent({...newEvent, type: e.target.value})}
-                                >
-                                    <option value="Meeting">Meeting</option>
-                                    <option value="Call">Call</option>
-                                    <option value="Task">Task</option>
-                                    <option value="Personal">Personal</option>
-                                    <option value="Deadline">Deadline</option>
-                                </select>
-                            </div>
+                            {!formState.isGlobal && (
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Event Type</label>
+                                    <select
+                                        className="w-full px-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                        value={formState.type}
+                                        onChange={(e) => setFormState({...formState, type: e.target.value})}
+                                    >
+                                        <option value="Meeting">Meeting</option>
+                                        <option value="Call">Call</option>
+                                        <option value="Task">Task</option>
+                                        <option value="Personal">Personal</option>
+                                        <option value="Deadline">Deadline</option>
+                                    </select>
+                                </div>
+                            )}
 
                             <button 
                                 onClick={handleCreateEvent}
                                 className="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
                             >
-                                Add to Calendar
+                                {editingId ? 'Save Changes' : (formState.isGlobal ? 'Post Team Event' : 'Add to Calendar')}
                             </button>
                         </div>
                     </div>
