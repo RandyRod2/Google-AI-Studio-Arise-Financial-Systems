@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateSaaSUsers, INITIAL_REGISTRY_DATA } from '../services/mockData';
 import { SaaSUser, Role, SubscriptionStatus, SubscriptionPlan, CommissionRegistry, CommissionRule } from '../types';
@@ -47,7 +46,7 @@ const PlatformAdmin: React.FC = () => {
     // --- Rate Editing State (New) ---
     const [isRateModalOpen, setIsRateModalOpen] = useState(false);
     const [editingTarget, setEditingTarget] = useState<{carrier: string, product: string} | null>(null);
-    const [levelEntries, setLevelEntries] = useState<{level: string, fyc: string, renewals: string}[]>([]);
+    const [levelEntries, setLevelEntries] = useState<{level: string, fyc: string, renewals: string, advanceRate: string, chargebackPeriod: string}[]>([]);
 
     // Persistence
     useEffect(() => {
@@ -192,7 +191,9 @@ const PlatformAdmin: React.FC = () => {
 
             newRegistry[carrier][product][level] = {
                 fyc,
-                renewals
+                renewals,
+                advanceRate: '75%',
+                chargebackPeriod: '9mo'
             };
         });
 
@@ -211,7 +212,7 @@ const PlatformAdmin: React.FC = () => {
         }
     };
 
-    // --- Rate Configuration Logic (Enhanced) ---
+    // --- Rate Configuration Logic ---
 
     const sortEntries = (entries: typeof levelEntries) => {
         return [...entries].sort((a, b) => Number(a.level) - Number(b.level));
@@ -221,26 +222,21 @@ const PlatformAdmin: React.FC = () => {
     const standardLevelsView = Array.from({ length: 14 }, (_, i) => 80 + i * 5); // [80, 85, ..., 145]
 
     const openRateModal = (carrier: string, product: string) => {
-        // 1. Identify all relevant levels: Existing stored levels + Standard levels (80-145)
+        // 1. Identify all relevant levels
         const existingLevels = Object.keys(registry[carrier][product]).map(Number);
-        
-        const standardLevels = [];
-        for (let i = 80; i <= 145; i += 5) {
-            standardLevels.push(i);
-        }
-        
-        // Merge and deduplicate
+        const standardLevels = Array.from({ length: 14 }, (_, i) => 80 + i * 5);
         const allLevels = Array.from(new Set([...existingLevels, ...standardLevels])).sort((a, b) => a - b);
 
-        // 2. Map levels to entries, calculating interpolated rates for any holes
+        // 2. Map levels to entries
         const entries = allLevels.map(level => {
-            // Pass current 'registry' state to getCommissionRate to ensure we use the latest data
-            const { fyc, renewals } = getCommissionRate(carrier, product, level, registry);
+            const rate = getCommissionRate(carrier, product, level, registry);
             
             return {
                 level: level.toString(),
-                fyc: (fyc * 100).toFixed(2), // Convert decimal to percent string
-                renewals: (renewals * 100).toFixed(2)
+                fyc: (rate.fyc * 100).toFixed(2),
+                renewals: (rate.renewals * 100).toFixed(2),
+                advanceRate: rate.advanceRate || '75%',
+                chargebackPeriod: rate.chargebackPeriod || '9mo'
             };
         });
         
@@ -255,7 +251,6 @@ const PlatformAdmin: React.FC = () => {
         const { carrier, product } = editingTarget;
         const newProductRules: Record<string, any> = {};
 
-        // Validate and convert back to decimal
         levelEntries.forEach(entry => {
             const lvl = parseInt(entry.level);
             const fyc = parseFloat(entry.fyc);
@@ -264,12 +259,13 @@ const PlatformAdmin: React.FC = () => {
             if (!isNaN(lvl) && !isNaN(fyc) && !isNaN(ren)) {
                 newProductRules[lvl.toString()] = {
                     fyc: fyc / 100,
-                    renewals: ren / 100
+                    renewals: ren / 100,
+                    advanceRate: entry.advanceRate,
+                    chargebackPeriod: entry.chargebackPeriod
                 };
             }
         });
 
-        // Update Registry
         const updatedRegistry = { ...registry };
         if (!updatedRegistry[carrier]) updatedRegistry[carrier] = {};
         updatedRegistry[carrier][product] = newProductRules;
@@ -280,7 +276,7 @@ const PlatformAdmin: React.FC = () => {
     };
 
     const handleAddLevelRow = () => {
-        setLevelEntries(sortEntries([...levelEntries, { level: '', fyc: '0', renewals: '0' }]));
+        setLevelEntries(sortEntries([...levelEntries, { level: '', fyc: '0', renewals: '0', advanceRate: '75%', chargebackPeriod: '9mo' }]));
     };
 
     const handleDeleteLevel = (index: number) => {
@@ -297,7 +293,6 @@ const PlatformAdmin: React.FC = () => {
 
     return (
         <div className="animate-fade-in space-y-6 pb-10">
-            {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -306,7 +301,6 @@ const PlatformAdmin: React.FC = () => {
                     <p className="text-sm text-slate-400">Super Admin Console</p>
                 </div>
                 
-                {/* Tab Switcher */}
                 <div className="bg-slate-900 p-1 rounded-lg border border-slate-800 shadow-sm flex">
                     <button
                         onClick={() => setActiveTab('USERS')}
@@ -331,11 +325,8 @@ const PlatformAdmin: React.FC = () => {
                 </div>
             </div>
 
-            {/* === USER MANAGEMENT TAB === */}
             {activeTab === 'USERS' && (
                 <div className="space-y-6 animate-fade-in">
-                    {/* ... (Existing User Management UI - Copied Logic) ... */}
-                    {/* Alert Banner */}
                     {pastDueUsers.length > 0 && (
                         <div 
                             onClick={() => setStatusFilter(statusFilter === 'past_due' ? 'ALL' : 'past_due')}
@@ -360,7 +351,6 @@ const PlatformAdmin: React.FC = () => {
                         </div>
                     )}
 
-                    {/* KPI Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-sm">
                             <div className="flex justify-between items-start">
@@ -430,7 +420,6 @@ const PlatformAdmin: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* User Table */}
                         <div className="lg:col-span-2 space-y-4">
                             <div className="flex flex-col sm:flex-row justify-between gap-4">
                                 <div className="relative flex-1">
@@ -526,9 +515,7 @@ const PlatformAdmin: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Sidebar Widgets */}
                         <div className="space-y-6">
-                            {/* System Health */}
                             <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-sm">
                                 <h3 className="font-bold text-white mb-4 flex items-center gap-2">
                                     <Activity size={18} className="text-indigo-500" /> System Health
@@ -548,55 +535,13 @@ const PlatformAdmin: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-
-                            {/* Recent Activity */}
-                            <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-sm">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-white flex items-center gap-2">
-                                        <Clock size={18} className="text-indigo-500" /> Recent Activity
-                                    </h3>
-                                    <button className="text-xs text-indigo-400 hover:underline">View All</button>
-                                </div>
-                                <div className="space-y-4 relative">
-                                    <div className="absolute left-1.5 top-2 bottom-2 w-px bg-slate-800"></div>
-                                    <div className="flex gap-3 relative">
-                                        <div className="w-3 h-3 bg-green-900 border-2 border-green-500 rounded-full mt-1 shrink-0 z-10"></div>
-                                        <div>
-                                            <p className="text-xs font-bold bg-green-500/10 text-green-400 px-2 py-0.5 rounded-md w-fit mb-1">Plan Upgrade</p>
-                                            <p className="text-sm font-bold text-white">Sarah Connor</p>
-                                            <p className="text-xs text-slate-500">Upgraded to Enterprise</p>
-                                            <p className="text-[10px] text-slate-600 mt-1">2 mins ago</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3 relative">
-                                        <div className="w-3 h-3 bg-red-900 border-2 border-red-500 rounded-full mt-1 shrink-0 z-10"></div>
-                                        <div>
-                                            <p className="text-xs font-bold bg-red-500/10 text-red-400 px-2 py-0.5 rounded-md w-fit mb-1">Payment Failed</p>
-                                            <p className="text-sm font-bold text-white">James Richardson</p>
-                                            <p className="text-xs text-slate-500">Card ending 4242 declined</p>
-                                            <p className="text-[10px] text-slate-600 mt-1">15 mins ago</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3 relative">
-                                        <div className="w-3 h-3 bg-blue-900 border-2 border-blue-500 rounded-full mt-1 shrink-0 z-10"></div>
-                                        <div>
-                                            <p className="text-xs font-bold bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-md w-fit mb-1">New User</p>
-                                            <p className="text-sm font-bold text-white">Michael Scott</p>
-                                            <p className="text-xs text-slate-500">Joined via Invitation</p>
-                                            <p className="text-[10px] text-slate-600 mt-1">1 hour ago</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* === COMMISSION REGISTRY TAB === */}
             {activeTab === 'REGISTRY' && (
                 <div className="animate-fade-in grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
-                    {/* Left: Input / Upload */}
                     <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-sm flex flex-col overflow-hidden">
                         <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
                             <h3 className="font-bold text-white flex items-center gap-2">
@@ -645,18 +590,6 @@ const PlatformAdmin: React.FC = () => {
                                             onChange={handleFileUpload}
                                         />
                                     </div>
-
-                                    <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                                        <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Example CSV Format (Manual)</h4>
-                                        <pre className="text-[10px] text-slate-400 font-mono bg-slate-900 p-2 rounded border border-slate-800 overflow-x-auto">
-                                            Carrier,Product,Level,FYC,Renewals{'\n'}
-                                            Aetna,Final Expense,100,0.90,0.05{'\n'}
-                                            Aetna,Final Expense,110,0.95,0.05
-                                        </pre>
-                                        <p className="text-[10px] text-slate-500 mt-2 italic">
-                                            * For PDF uploads, simply upload the carrier's commission grid document directly. The AI will extract the data.
-                                        </p>
-                                    </div>
                                 </div>
                             ) : (
                                 <div className="h-full flex flex-col">
@@ -677,7 +610,6 @@ const PlatformAdmin: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Right: Registry Explorer */}
                     <div className="lg:col-span-2 bg-slate-900 rounded-xl border border-slate-800 shadow-sm flex flex-col overflow-hidden">
                         <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
                             <h3 className="font-bold text-white">Active Registry</h3>
@@ -686,80 +618,71 @@ const PlatformAdmin: React.FC = () => {
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            {Object.keys(registry).length === 0 ? (
-                                <div className="text-center py-20 text-slate-500 italic">
-                                    No commission data found. Upload a grid to get started.
-                                </div>
-                            ) : (
-                                Object.entries(registry).sort().map(([carrier, products]) => (
-                                    <div key={carrier} className="border border-slate-800 rounded-xl bg-slate-950/30 overflow-hidden">
-                                        <div 
-                                            className="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-colors"
-                                            onClick={() => toggleCarrier(carrier)}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded bg-white text-slate-900 font-bold flex items-center justify-center text-xs">
-                                                    {carrier.substring(0,2).toUpperCase()}
-                                                </div>
-                                                <span className="font-bold text-slate-200">{carrier}</span>
+                            {Object.entries(registry).sort().map(([carrier, products]) => (
+                                <div key={carrier} className="border border-slate-800 rounded-xl bg-slate-950/30 overflow-hidden">
+                                    <div 
+                                        className="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-colors"
+                                        onClick={() => toggleCarrier(carrier)}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded bg-white text-slate-900 font-bold flex items-center justify-center text-xs">
+                                                {carrier.substring(0,2).toUpperCase()}
                                             </div>
-                                            <div className="flex items-center gap-3">
-                                                <span className="text-xs text-slate-500">{Object.keys(products).length} Products</span>
-                                                {expandedCarrier === carrier ? <ChevronUp size={16} className="text-slate-500"/> : <ChevronDown size={16} className="text-slate-500"/>}
-                                            </div>
+                                            <span className="font-bold text-slate-200">{carrier}</span>
                                         </div>
-                                        
-                                        {expandedCarrier === carrier && (
-                                            <div className="border-t border-slate-800 bg-slate-900/50 p-4 space-y-4 animate-fade-in">
-                                                <div className="flex justify-end">
-                                                    <button 
-                                                        onClick={() => deleteCarrier(carrier)}
-                                                        className="text-xs text-red-400 hover:underline flex items-center gap-1"
-                                                    >
-                                                        <Trash2 size={12}/> Remove Carrier
-                                                    </button>
-                                                </div>
-                                                {Object.entries(products).map(([product, levels]) => (
-                                                    <div key={product} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-                                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
-                                                            <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wide">
-                                                                {product}
-                                                            </h4>
-                                                            <button 
-                                                                onClick={() => openRateModal(carrier, product)}
-                                                                className="text-[10px] font-bold text-slate-400 hover:text-white bg-slate-900 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 transition-colors"
-                                                            >
-                                                                <Edit2 size={10} /> Edit Rates
-                                                            </button>
-                                                        </div>
-                                                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                                                            {standardLevelsView.map((level) => {
-                                                                const rate = getCommissionRate(carrier, product, level, registry);
-                                                                return (
-                                                                    <div key={level} className="bg-slate-900 p-2 rounded border border-slate-800 text-center">
-                                                                        <div className="text-[10px] text-slate-500">Lvl {level}</div>
-                                                                        <div className="font-bold text-white text-sm">{(rate.fyc * 100).toFixed(0)}%</div>
-                                                                        <div className="text-[9px] text-green-500">Ren: {(rate.renewals * 100).toFixed(0)}%</div>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-xs text-slate-500">{Object.keys(products).length} Products</span>
+                                            {expandedCarrier === carrier ? <ChevronUp size={16} className="text-slate-500"/> : <ChevronDown size={16} className="text-slate-500"/>}
+                                        </div>
                                     </div>
-                                ))
-                            )}
+                                    
+                                    {expandedCarrier === carrier && (
+                                        <div className="border-t border-slate-800 bg-slate-900/50 p-4 space-y-4 animate-fade-in">
+                                            <div className="flex justify-end">
+                                                <button 
+                                                    onClick={() => deleteCarrier(carrier)}
+                                                    className="text-xs text-red-400 hover:underline flex items-center gap-1"
+                                                >
+                                                    <Trash2 size={12}/> Remove Carrier
+                                                </button>
+                                            </div>
+                                            {Object.entries(products).map(([product, levels]) => (
+                                                <div key={product} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                                                    <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                                                        <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wide">{product}</h4>
+                                                        <button 
+                                                            onClick={() => openRateModal(carrier, product)}
+                                                            className="text-[10px] font-bold text-slate-400 hover:text-white bg-slate-900 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 transition-colors"
+                                                        >
+                                                            <Edit2 size={10} /> Edit Rates
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                                                        {standardLevelsView.map((level) => {
+                                                            const rate = getCommissionRate(carrier, product, level, registry);
+                                                            return (
+                                                                <div key={level} className="bg-slate-900 p-2 rounded border border-slate-800 text-center">
+                                                                    <div className="text-[10px] text-slate-500">Lvl {level}</div>
+                                                                    <div className="font-bold text-white text-sm">{(rate.fyc * 100).toFixed(0)}%</div>
+                                                                    <div className="text-[9px] text-green-500">{(rate.advanceRate)} / {(rate.chargebackPeriod)}</div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* === RATE CONFIGURATION MODAL === */}
             {isRateModalOpen && editingTarget && (
                 <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-2xl ring-1 ring-white/10 flex flex-col max-h-[90vh]">
+                    <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-[800px] ring-1 ring-white/10 flex flex-col max-h-[90vh]">
                         <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50 rounded-t-xl shrink-0">
                             <div>
                                 <h3 className="font-bold text-lg text-white">{editingTarget.product}</h3>
@@ -783,15 +706,17 @@ const PlatformAdmin: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <div className="grid grid-cols-4 gap-4 text-[10px] uppercase font-bold text-slate-500 px-2">
+                                    <div className="grid grid-cols-6 gap-2 text-[10px] uppercase font-bold text-slate-500 px-2">
                                         <div>Level</div>
                                         <div>FYC %</div>
                                         <div>Renewals %</div>
+                                        <div>Advance %</div>
+                                        <div>Chargeback</div>
                                         <div className="text-right">Action</div>
                                     </div>
                                     
                                     {levelEntries.map((entry, idx) => (
-                                        <div key={idx} className="grid grid-cols-4 gap-4 items-center bg-slate-950 p-2 rounded-lg border border-slate-800">
+                                        <div key={idx} className="grid grid-cols-6 gap-2 items-center bg-slate-950 p-2 rounded-lg border border-slate-800">
                                             <input 
                                                 type="number" 
                                                 className="bg-transparent border-b border-slate-700 text-white text-sm font-bold w-full focus:border-indigo-500 outline-none p-1"
@@ -819,6 +744,25 @@ const PlatformAdmin: React.FC = () => {
                                                 />
                                                 <span className="absolute right-0 top-1.5 text-xs text-slate-500">%</span>
                                             </div>
+                                            <select 
+                                                className="bg-slate-900 border border-slate-700 text-white text-[10px] rounded p-1 outline-none"
+                                                value={entry.advanceRate}
+                                                onChange={(e) => updateLevelEntry(idx, 'advanceRate', e.target.value)}
+                                            >
+                                                <option value="Paid as Earned">Paid as Earned</option>
+                                                <option value="50%">50%</option>
+                                                <option value="75%">75%</option>
+                                                <option value="100%">100%</option>
+                                            </select>
+                                            <select 
+                                                className="bg-slate-900 border border-slate-700 text-white text-[10px] rounded p-1 outline-none"
+                                                value={entry.chargebackPeriod}
+                                                onChange={(e) => updateLevelEntry(idx, 'chargebackPeriod', e.target.value)}
+                                            >
+                                                <option value="6mo">6mo</option>
+                                                <option value="9mo">9mo</option>
+                                                <option value="12mo">12mo</option>
+                                            </select>
                                             <div className="text-right">
                                                 <button 
                                                     onClick={() => handleDeleteLevel(idx)}
@@ -829,12 +773,6 @@ const PlatformAdmin: React.FC = () => {
                                             </div>
                                         </div>
                                     ))}
-                                    
-                                    {levelEntries.length === 0 && (
-                                        <div className="text-center py-8 text-slate-500 text-sm border-2 border-dashed border-slate-800 rounded-lg">
-                                            No levels defined. Add a level to enable commissions.
-                                        </div>
-                                    )}
                                 </div>
                             </div>
                         </div>
@@ -857,11 +795,9 @@ const PlatformAdmin: React.FC = () => {
                 </div>
             )}
 
-            {/* Edit Modal (Existing User Edit) */}
             {isEditModalOpen && editingUser && (
                 <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-slate-900 rounded-xl shadow-2xl w-full max-w-lg animate-fade-in overflow-hidden flex flex-col max-h-[90vh] border border-slate-800">
-                        {/* ... Existing Modal Content ... */}
                         <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50 rounded-t-xl shrink-0">
                             <h3 className="font-bold text-white flex items-center gap-2">
                                 <Edit2 size={18} className="text-indigo-500" /> Edit User
@@ -872,7 +808,6 @@ const PlatformAdmin: React.FC = () => {
                         </div>
                         
                         <div className="p-6 space-y-6 overflow-y-auto">
-                            {/* Profile Section */}
                             <div>
                                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Profile Information</h4>
                                 <div className="grid grid-cols-2 gap-4">
@@ -900,100 +835,14 @@ const PlatformAdmin: React.FC = () => {
                                             />
                                         </div>
                                     </div>
-                                    <div className="col-span-2">
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Agency / Company</label>
-                                        <div className="relative">
-                                            <Database size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <input 
-                                                type="text"
-                                                className="w-full pl-9 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
-                                                value={editForm.agencyName || ''}
-                                                onChange={(e) => setEditForm({...editForm, agencyName: e.target.value})}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <hr className="border-slate-800" />
-
-                            {/* Subscription Section */}
-                            <div>
-                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Subscription & Access</h4>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Role</label>
-                                        <div className="relative">
-                                            <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <select 
-                                                className="w-full pl-9 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
-                                                value={editForm.role}
-                                                onChange={(e) => setEditForm({...editForm, role: e.target.value as Role})}
-                                                disabled={editingUser.role === 'ADMIN' && editingUser.id === 'u1'}
-                                            >
-                                                <option value="ADMIN">Super Admin</option>
-                                                <option value="AGENCY_OWNER">Agency Owner</option>
-                                                <option value="MANAGER">Manager</option>
-                                                <option value="AGENT">Agent</option>
-                                                <option value="STAFF">Staff</option>
-                                                <option value="RECRUIT">Recruit</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
-                                        <div className="relative">
-                                            <Activity size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <select 
-                                                className="w-full pl-9 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
-                                                value={editForm.status}
-                                                onChange={(e) => setEditForm({...editForm, status: e.target.value as SubscriptionStatus})}
-                                            >
-                                                <option value="active">Active</option>
-                                                <option value="past_due">Past Due</option>
-                                                <option value="cancelled">Cancelled</option>
-                                                <option value="trial">Trial</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Plan Tier</label>
-                                        <div className="relative">
-                                            <CreditCard size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <select 
-                                                className="w-full pl-9 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
-                                                value={editForm.plan}
-                                                onChange={(e) => setEditForm({...editForm, plan: e.target.value as SubscriptionPlan})}
-                                            >
-                                                <option value="starter">Starter</option>
-                                                <option value="professional">Professional</option>
-                                                <option value="enterprise">Enterprise</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Monthly Fee ($)</label>
-                                        <div className="relative">
-                                            <DollarSign size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <input 
-                                                type="number"
-                                                className="w-full pl-9 pr-3 py-2 border border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
-                                                value={editForm.monthlyFee}
-                                                onChange={(e) => setEditForm({...editForm, monthlyFee: parseFloat(e.target.value) || 0})}
-                                            />
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="p-5 border-t border-slate-800 bg-slate-950/30 rounded-b-xl flex gap-3 shrink-0">
+                        <div className="p-5 border-t border-slate-800 bg-slate-950/30 rounded-b-xl flex justify-end gap-3 shrink-0">
                             <button 
                                 onClick={() => setIsEditModalOpen(false)}
-                                className="flex-1 py-2.5 border border-slate-700 text-slate-300 font-bold rounded-lg hover:bg-slate-800 transition-colors text-sm"
+                                className="px-4 py-2 border border-slate-700 text-slate-300 font-bold rounded-lg hover:bg-slate-800 transition-colors text-sm"
                             >
                                 Cancel
                             </button>

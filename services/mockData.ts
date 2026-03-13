@@ -209,6 +209,27 @@ export const MOCK_CLIENTS: Client[] = [
     pipelineStage: PipelineStage.ISSUED,
     leadSource: 'Referral',
     lastContactDate: '2024-03-10',
+    ssn: '666-00-1234',
+    driversLicense: 'D12345678',
+    height: "6'0\"",
+    weight: '185',
+    occupation: 'Software Engineer',
+    beneficiaries: [
+      {
+        id: 'b1',
+        clientId: 'c1',
+        name: 'Linda Richardson',
+        relationship: 'Spouse',
+        type: 'Primary',
+        percentage: 100
+      }
+    ],
+    healthConditions: 'None',
+    currentPrescriptions: 'None',
+    paymentMethod: 'Bank Draft',
+    bankName: 'Chase Bank',
+    routingNumber: '123456789',
+    accountNumber: '987654321',
     policies: [
       {
         id: 'p1',
@@ -238,6 +259,28 @@ export const MOCK_CLIENTS: Client[] = [
     pipelineStage: PipelineStage.APPOINTMENT_SET,
     leadSource: 'Facebook Ad',
     lastContactDate: '2024-03-15',
+    ssn: '999-00-9999',
+    driversLicense: 'CA-TERMINATOR',
+    height: "5'8\"",
+    weight: '145',
+    occupation: 'Resistance Leader',
+    beneficiaries: [
+      {
+        id: 'b2',
+        clientId: 'c2',
+        name: 'John Connor',
+        relationship: 'Son',
+        type: 'Primary',
+        percentage: 100
+      }
+    ],
+    healthConditions: 'PTSD',
+    currentPrescriptions: 'None',
+    paymentMethod: 'Credit Card',
+    cardNumber: '4111222233334444',
+    expirationDate: '12/28',
+    cvv: '123',
+    billingZipCode: '90210',
     policies: []
   },
   {

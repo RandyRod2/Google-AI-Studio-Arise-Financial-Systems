@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Application, Client, TeamMember } from '../types';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Application, Client, TeamMember, PolicyType } from '../types';
 import { FileText, Filter, Download, CheckCircle, XCircle, MoreHorizontal, Edit2, Trash2, X, Save, Phone, Calendar, Hash, ShieldCheck, DollarSign, Upload, Eye, ChevronDown, Plus, Volume2 } from 'lucide-react';
 import { calculateCommissionExact, getAvailableCarriers, getAvailableProducts } from '../services/commissionService';
 import { MOCK_TEAM } from '../services/mockData';
@@ -8,6 +8,13 @@ import { MOCK_TEAM } from '../services/mockData';
 const getLocalToday = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// Safe date formatter for YYYY-MM-DD
+const formatDate = (dateStr: string) => {
+    if (!dateStr) return 'N/A';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 interface ApplicationsProps {
@@ -23,11 +30,15 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [editingApp, setEditingApp] = useState<Application | null>(null);
     
+    // Tab State
+    const [activeTab, setActiveTab] = useState<'ALL' | 'APPROVED' | 'ISSUED' | 'UNDERWRITING' | 'DECLINED'>('ALL');
+
     // Form State
     const [newApp, setNewApp] = useState<Partial<Application>>({
         status: 'Submitted',
         submittedDate: getLocalToday(),
-        policyStartDate: getLocalToday()
+        policyStartDate: getLocalToday(),
+        policyType: PolicyType.TERM
     });
     const [monthlyInput, setMonthlyInput] = useState<string>(''); 
     
@@ -100,7 +111,8 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
         setNewApp({ 
             status: 'Submitted', 
             submittedDate: getLocalToday(),
-            policyStartDate: getLocalToday()
+            policyStartDate: getLocalToday(),
+            policyType: PolicyType.TERM
         });
         setMonthlyInput('');
         setIsAddModalOpen(true);
@@ -117,6 +129,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
             clientName: client ? `${client.firstName} ${client.lastName}` : 'Unknown',
             carrier: newApp.carrier,
             product: newApp.product,
+            policyType: newApp.policyType as PolicyType,
             policyNumber: newApp.policyNumber,
             submittedDate: newApp.submittedDate || getLocalToday(),
             policyStartDate: newApp.policyStartDate,
@@ -199,6 +212,18 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
     const metrics = calculateMetrics();
     const clientDetails = editingApp ? getClientDetails(editingApp.clientId) : null;
 
+    // Filter Logic for Tabs
+    const filteredApplications = useMemo(() => {
+        if (activeTab === 'ALL') return applications;
+        return applications.filter(app => {
+            if (activeTab === 'APPROVED') return app.status === 'Approved';
+            if (activeTab === 'ISSUED') return app.status === 'Issued';
+            if (activeTab === 'UNDERWRITING') return app.status === 'Underwriting';
+            if (activeTab === 'DECLINED') return app.status === 'Declined';
+            return true;
+        });
+    }, [applications, activeTab]);
+
     return (
         <div className="animate-fade-in space-y-6">
             <div className="flex justify-between items-center">
@@ -212,11 +237,28 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                      </button>
                      <button 
                         onClick={openAddModal}
-                        className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium shadow-sm transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium shadow-sm transition-colors"
                      >
                         <Plus size={16} /> Add Application
                      </button>
                 </div>
+            </div>
+
+            {/* Application Filter Tabs */}
+            <div className="flex gap-2 border-b border-white/5 pb-1">
+                {(['ALL', 'APPROVED', 'ISSUED', 'UNDERWRITING', 'DECLINED'] as const).map(tab => (
+                    <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 ${
+                            activeTab === tab 
+                                ? 'text-indigo-400 border-indigo-500 bg-indigo-500/5' 
+                                : 'text-slate-500 border-transparent hover:text-slate-300'
+                        }`}
+                    >
+                        {tab === 'ALL' ? 'ALL APPLICATIONS' : tab}
+                    </button>
+                ))}
             </div>
 
             <div className="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
@@ -233,12 +275,12 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                        {applications.length === 0 ? (
+                        {filteredApplications.length === 0 ? (
                             <tr>
                                 <td colSpan={7} className="px-6 py-8 text-center text-slate-500">No applications found.</td>
                             </tr>
                         ) : (
-                            applications.map((app) => (
+                            filteredApplications.map((app) => (
                                 <tr key={app.id} className="hover:bg-slate-800/50 transition-colors group">
                                     <td className="px-6 py-4">
                                         <select
@@ -266,7 +308,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                         <div className="text-xs text-slate-500">{app.product}</div>
                                     </td>
                                     <td className="px-6 py-4 text-sm text-slate-400 cursor-pointer" onClick={() => handleEditClick(app)}>
-                                        {app.submittedDate}
+                                        {formatDate(app.submittedDate)}
                                     </td>
                                     <td className="px-6 py-4 font-medium text-white cursor-pointer" onClick={() => handleEditClick(app)}>
                                         ${app.premium.toLocaleString()}
@@ -371,6 +413,17 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                 </div>
                             </div>
 
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Policy Type</label>
+                                <select 
+                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
+                                    value={newApp.policyType}
+                                    onChange={(e) => setNewApp({...newApp, policyType: e.target.value as PolicyType})}
+                                >
+                                    {Object.values(PolicyType).map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Monthly Premium</label>
@@ -436,7 +489,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Policy Number</label>
                                 <input 
                                     type="text"
-                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
+                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
                                     placeholder="Optional"
                                     value={newApp.policyNumber || ''}
                                     onChange={(e) => setNewApp({...newApp, policyNumber: e.target.value})}
@@ -448,7 +501,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Submitted Date</label>
                                     <input 
                                         type="date"
-                                        className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
+                                        className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
                                         value={newApp.submittedDate}
                                         onChange={(e) => setNewApp({...newApp, submittedDate: e.target.value})}
                                     />
@@ -457,7 +510,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Policy Start Date</label>
                                     <input 
                                         type="date"
-                                        className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
+                                        className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
                                         value={newApp.policyStartDate || ''}
                                         onChange={(e) => setNewApp({...newApp, policyStartDate: e.target.value})}
                                     />
@@ -467,7 +520,7 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                             <div>
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Notes</label>
                                 <textarea 
-                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none bg-slate-950 text-white"
+                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-slate-950 text-white"
                                     rows={3}
                                     placeholder="Optional notes..."
                                     value={newApp.notes || ''}
@@ -611,6 +664,16 @@ const Applications: React.FC<ApplicationsProps> = ({ applications, clients, onUp
                                                 onChange={(e) => setEditingApp({...editingApp, product: e.target.value})}
                                             />
                                         )}
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-500">Policy Type</label>
+                                        <select 
+                                            className="w-full border border-slate-700 rounded p-1.5 text-sm font-medium text-white bg-slate-950 focus:ring-2 focus:ring-blue-500 outline-none transition-colors"
+                                            value={editingApp.policyType}
+                                            onChange={(e) => setEditingApp({...editingApp, policyType: e.target.value as PolicyType})}
+                                        >
+                                            {Object.values(PolicyType).map(t => <option key={t} value={t}>{t}</option>)}
+                                        </select>
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-xs font-medium text-slate-500">Coverage Amount</label>

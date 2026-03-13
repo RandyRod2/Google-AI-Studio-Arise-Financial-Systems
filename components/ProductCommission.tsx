@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { CommissionRegistry, User } from '../types';
-import { Search, Filter, Database, AlertCircle, ChevronDown, Table2, Edit2, Plus, X, Save, Trash2, Check, RefreshCw } from 'lucide-react';
+import { Search, Filter, Database, AlertCircle, ChevronDown, Table2, Edit2, Plus, X, Save, Trash2, Check, RefreshCw, Clock } from 'lucide-react';
 import { INITIAL_REGISTRY_DATA } from '../services/mockData';
 import { getCommissionRate } from '../services/commissionService';
 
@@ -28,7 +27,7 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
     
     // Editing Data
     const [editingTarget, setEditingTarget] = useState<{carrier: string, product: string} | null>(null);
-    const [levelEntries, setLevelEntries] = useState<{level: string, fyc: string, renewals: string}[]>([]);
+    const [levelEntries, setLevelEntries] = useState<{level: string, fyc: string, renewals: string, advanceRate: string, chargebackPeriod: string}[]>([]);
     
     // New Product Data
     const [newProductData, setNewProductData] = useState({ carrier: '', product: '' });
@@ -71,14 +70,14 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
 
         // 2. Map levels to entries, calculating interpolated rates for any holes
         const entries = allLevels.map(level => {
-            // Pass current 'registry' state to getCommissionRate to ensure we use the latest data
-            // This will return either the explicit value (if exists) or the interpolated value
-            const { fyc, renewals } = getCommissionRate(carrier, product, level, registry);
+            const rate = getCommissionRate(carrier, product, level, registry);
             
             return {
                 level: level.toString(),
-                fyc: (fyc * 100).toFixed(2), // Convert decimal to percent string
-                renewals: (renewals * 100).toFixed(2)
+                fyc: (rate.fyc * 100).toFixed(2), // Convert decimal to percent string
+                renewals: (rate.renewals * 100).toFixed(2),
+                advanceRate: rate.advanceRate || '75%',
+                chargebackPeriod: rate.chargebackPeriod || '9mo'
             };
         });
         
@@ -102,7 +101,9 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
             if (!isNaN(lvl) && !isNaN(fyc) && !isNaN(ren)) {
                 newProductRules[lvl.toString()] = {
                     fyc: fyc / 100,
-                    renewals: ren / 100
+                    renewals: ren / 100,
+                    advanceRate: entry.advanceRate,
+                    chargebackPeriod: entry.chargebackPeriod
                 };
             }
         });
@@ -124,13 +125,13 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
     };
 
     const handleAddLevelRow = () => {
-        setLevelEntries(sortEntries([...levelEntries, { level: '', fyc: '0', renewals: '0' }]));
+        setLevelEntries(sortEntries([...levelEntries, { level: '', fyc: '0', renewals: '0', advanceRate: '75%', chargebackPeriod: '9mo' }]));
     };
 
     const updateLevelEntry = (index: number, field: keyof typeof levelEntries[0], value: string) => {
         const newEntries = [...levelEntries];
         newEntries[index] = { ...newEntries[index], [field]: value };
-        setLevelEntries(newEntries); // Don't sort while typing to avoid jumping rows
+        setLevelEntries(newEntries); 
     };
 
     const handleCreateProduct = () => {
@@ -143,7 +144,7 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
         // If product doesn't exist, create it
         if (!updatedRegistry[newProductData.carrier][newProductData.product]) {
             updatedRegistry[newProductData.carrier][newProductData.product] = {
-                "100": { fyc: 0.90, renewals: 0.0 } // Default starter level
+                "100": { fyc: 0.90, renewals: 0.0, advanceRate: '75%', chargebackPeriod: '9mo' } // Default starter level
             };
         }
 
@@ -161,14 +162,19 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
 
     // Flatten data for table view
     const tableData = useMemo(() => {
-        const rows: { carrier: string, product: string, fyc: number, renewals: number }[] = [];
+        const rows: { carrier: string, product: string, fyc: number, renewals: number, advanceRate: string, chargebackPeriod: string }[] = [];
         
         Object.entries(registry).forEach(([carrier, products]) => {
             Object.entries(products).forEach(([product]) => {
-                // Use interpolation for view mode, passing current registry
-                const { fyc, renewals } = getCommissionRate(carrier, product, selectedLevel, registry);
-                
-                rows.push({ carrier, product, fyc, renewals });
+                const rate = getCommissionRate(carrier, product, selectedLevel, registry);
+                rows.push({ 
+                    carrier, 
+                    product, 
+                    fyc: rate.fyc, 
+                    renewals: rate.renewals, 
+                    advanceRate: rate.advanceRate || '75%', 
+                    chargebackPeriod: rate.chargebackPeriod || '9mo' 
+                });
             });
         });
         
@@ -193,7 +199,6 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                 </div>
                 
                 <div className="flex items-center gap-3">
-                    {/* Add Product Button (Edit Mode Only) */}
                     {isEditMode && (
                         <button 
                             onClick={() => setIsNewProductModalOpen(true)}
@@ -203,7 +208,6 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                         </button>
                     )}
 
-                    {/* Edit Mode Toggle */}
                     {canEdit && (
                         <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-1">
                             <button 
@@ -221,7 +225,6 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                         </div>
                     )}
 
-                    {/* Level Selector (Disabled in Edit Mode) */}
                     <div className={`relative ${isEditMode ? 'opacity-30 pointer-events-none' : ''}`}>
                         <select 
                             className="appearance-none bg-slate-900 border border-slate-700 text-white py-2 pl-4 pr-10 rounded-lg text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
@@ -235,7 +238,6 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                         <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                     </div>
 
-                    {/* Search */}
                     <div className="relative w-48 md:w-64">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                         <input 
@@ -249,7 +251,6 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                 </div>
             </div>
 
-            {/* Main Table */}
             {Object.keys(registry).length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/50 p-12 text-center">
                     <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4">
@@ -274,13 +275,15 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                                     </th>
                                     <th className="px-6 py-4 border-b border-white/5 text-right">FYC Rate</th>
                                     <th className="px-6 py-4 border-b border-white/5 text-right">Renewals</th>
+                                    <th className="px-6 py-4 border-b border-white/5 text-right">Advance %</th>
+                                    <th className="px-6 py-4 border-b border-white/5 text-right">Chargeback</th>
                                     {isEditMode && <th className="px-6 py-4 border-b border-white/5 text-center w-20">Edit</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
                                 {tableData.length === 0 ? (
                                     <tr>
-                                        <td colSpan={isEditMode ? 6 : 5} className="px-6 py-12 text-center text-slate-500">
+                                        <td colSpan={isEditMode ? 8 : 7} className="px-6 py-12 text-center text-slate-500">
                                             No products found matching "{searchTerm}"
                                         </td>
                                     </tr>
@@ -314,6 +317,16 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                                             </td>
                                             <td className="px-6 py-4 text-right font-medium text-green-400 text-sm">
                                                 {(row.renewals * 100).toFixed(1)}%
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${row.advanceRate === 'Paid as Earned' ? 'bg-slate-800 text-slate-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                                                    {row.advanceRate}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <span className="text-[10px] font-bold text-slate-500 flex items-center justify-end gap-1">
+                                                    <Clock size={10} /> {row.chargebackPeriod}
+                                                </span>
                                             </td>
                                             {isEditMode && (
                                                 <td className="px-6 py-4 text-center">
@@ -352,7 +365,7 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
             {/* === RATE CONFIGURATION MODAL === */}
             {isRateModalOpen && editingTarget && (
                 <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-2xl ring-1 ring-white/10 flex flex-col max-h-[90vh]">
+                    <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-[800px] ring-1 ring-white/10 flex flex-col max-h-[90vh]">
                         <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50 rounded-t-xl shrink-0">
                             <div>
                                 <h3 className="font-bold text-lg text-white">{editingTarget.product}</h3>
@@ -376,15 +389,17 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                                 </div>
 
                                 <div className="space-y-2">
-                                    <div className="grid grid-cols-4 gap-4 text-[10px] uppercase font-bold text-slate-500 px-2">
+                                    <div className="grid grid-cols-6 gap-2 text-[10px] uppercase font-bold text-slate-500 px-2">
                                         <div>Level</div>
                                         <div>FYC %</div>
                                         <div>Renewals %</div>
+                                        <div>Advance %</div>
+                                        <div>Chargeback</div>
                                         <div className="text-right">Action</div>
                                     </div>
                                     
                                     {levelEntries.map((entry, idx) => (
-                                        <div key={idx} className="grid grid-cols-4 gap-4 items-center bg-slate-950 p-2 rounded-lg border border-slate-800">
+                                        <div key={idx} className="grid grid-cols-6 gap-2 items-center bg-slate-950 p-2 rounded-lg border border-slate-800">
                                             <input 
                                                 type="number" 
                                                 className="bg-transparent border-b border-slate-700 text-white text-sm font-bold w-full focus:border-indigo-500 outline-none p-1"
@@ -412,6 +427,25 @@ const ProductCommission: React.FC<ProductCommissionProps> = ({ currentUser }) =>
                                                 />
                                                 <span className="absolute right-0 top-1.5 text-xs text-slate-500">%</span>
                                             </div>
+                                            <select 
+                                                className="bg-slate-900 border border-slate-700 text-white text-[10px] rounded p-1 outline-none"
+                                                value={entry.advanceRate}
+                                                onChange={(e) => updateLevelEntry(idx, 'advanceRate', e.target.value)}
+                                            >
+                                                <option value="Paid as Earned">Paid as Earned</option>
+                                                <option value="50%">50%</option>
+                                                <option value="75%">75%</option>
+                                                <option value="100%">100%</option>
+                                            </select>
+                                            <select 
+                                                className="bg-slate-900 border border-slate-700 text-white text-[10px] rounded p-1 outline-none"
+                                                value={entry.chargebackPeriod}
+                                                onChange={(e) => updateLevelEntry(idx, 'chargebackPeriod', e.target.value)}
+                                            >
+                                                <option value="6mo">6mo</option>
+                                                <option value="9mo">9mo</option>
+                                                <option value="12mo">12mo</option>
+                                            </select>
                                             <div className="text-right">
                                                 <button 
                                                     onClick={() => handleDeleteLevel(idx)}

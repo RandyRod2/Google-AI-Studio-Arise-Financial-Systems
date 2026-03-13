@@ -1,5 +1,4 @@
-
-import { CommissionRegistry, CommissionRule } from '../types';
+import { CommissionRegistry, CommissionRule, TeamMember, OverrideRecord, Policy } from '../types';
 import { INITIAL_REGISTRY_DATA } from './mockData';
 
 export const getCommissionRegistry = (): CommissionRegistry => {
@@ -36,24 +35,30 @@ export const getCommissionRate = (
     product: string, 
     compLevel: number,
     providedRegistry?: CommissionRegistry
-): { fyc: number, renewals: number } => {
+): { fyc: number, renewals: number, advanceRate?: string, chargebackPeriod?: string } => {
     const registry = providedRegistry || getCommissionRegistry();
     
     // 1. Find Carrier (Case insensitive search)
     const carrierKey = Object.keys(registry).find(k => k.toLowerCase() === carrier.toLowerCase());
-    if (!carrierKey) return { fyc: 0, renewals: 0 };
+    if (!carrierKey) return { fyc: 0, renewals: 0, advanceRate: '75%', chargebackPeriod: '9mo' };
 
     // 2. Find Product (Case insensitive search)
     const productData = registry[carrierKey];
     const productKey = Object.keys(productData).find(k => k.toLowerCase() === product.toLowerCase());
-    if (!productKey) return { fyc: 0, renewals: 0 };
+    if (!productKey) return { fyc: 0, renewals: 0, advanceRate: '75%', chargebackPeriod: '9mo' };
 
     const levelsData = productData[productKey];
     const levelKey = compLevel.toString();
 
     // 3. Exact Match Check
     if (levelsData[levelKey]) {
-        return levelsData[levelKey];
+        const rule = levelsData[levelKey];
+        return { 
+            fyc: rule.fyc, 
+            renewals: rule.renewals, 
+            advanceRate: rule.advanceRate || '75%', 
+            chargebackPeriod: rule.chargebackPeriod || '9mo' 
+        };
     }
 
     // 4. Interpolation Logic
@@ -73,13 +78,23 @@ export const getCommissionRate = (
     // Case: Level is below minimum defined (Use lowest defined rate)
     if (lowerLevel === null && upperLevel !== null) {
         const rule = levelsData[upperLevel.toString()];
-        return { fyc: rule.fyc, renewals: rule.renewals };
+        return { 
+            fyc: rule.fyc, 
+            renewals: rule.renewals,
+            advanceRate: rule.advanceRate || '75%',
+            chargebackPeriod: rule.chargebackPeriod || '9mo'
+        };
     }
 
     // Case: Level is above maximum defined (Use highest defined rate)
     if (upperLevel === null && lowerLevel !== null) {
         const rule = levelsData[lowerLevel.toString()];
-        return { fyc: rule.fyc, renewals: rule.renewals };
+        return { 
+            fyc: rule.fyc, 
+            renewals: rule.renewals,
+            advanceRate: rule.advanceRate || '75%',
+            chargebackPeriod: rule.chargebackPeriod || '9mo'
+        };
     }
 
     // Case: Bounded between two known levels -> Linear Interpolation
@@ -95,12 +110,15 @@ export const getCommissionRate = (
         
         return {
             fyc: parseFloat(fyc.toFixed(4)), // Avoid floating point drift
-            renewals: parseFloat(renewals.toFixed(4))
+            renewals: parseFloat(renewals.toFixed(4)),
+            // Picking categorical fields from lower bounding level
+            advanceRate: lowerRule.advanceRate || '75%',
+            chargebackPeriod: lowerRule.chargebackPeriod || '9mo'
         };
     }
 
     // Default Fallback
-    return { fyc: compLevel / 100, renewals: 0 };
+    return { fyc: compLevel / 100, renewals: 0, advanceRate: '75%', chargebackPeriod: '9mo' };
 };
 
 /**
@@ -126,4 +144,67 @@ export const calculateCommissionExact = (
         total: premium * fyc,
         fycRate: fyc
     };
+};
+
+/**
+ * Automation: Processes a newly issued policy to compute and store manager overrides.
+ * Walks up the hierarchy and calculates spreads.
+ */
+export const processPolicyOverrides = (
+    policy: Policy,
+    writingAgentId: string,
+    teamMembers: TeamMember[]
+) => {
+    const storedOverridesRaw = localStorage.getItem('arise_overrides_v1');
+    let overrides: OverrideRecord[] = storedOverridesRaw ? JSON.parse(storedOverridesRaw) : [];
+
+    const writingAgent = teamMembers.find(m => m.id === writingAgentId || (m.id === 't1' && writingAgentId === 'u1'));
+    if (!writingAgent) return;
+
+    let currentLowerLevel = writingAgent.defaultCompLevel;
+    let currentManagerId = writingAgent.parentId;
+
+    while (currentManagerId) {
+        const manager = teamMembers.find(m => m.id === currentManagerId);
+        if (!manager) break;
+
+        // Duplicate Check: policyId + managerId
+        const exists = overrides.some(o => o.policyId === policy.id && o.managerId === manager.id);
+        if (exists) {
+            // Traverse up without inserting to maintain chain consistency
+            currentLowerLevel = manager.defaultCompLevel;
+            currentManagerId = manager.parentId;
+            continue;
+        }
+
+        const managerLevel = manager.defaultCompLevel;
+        const spreadPercent = Math.max(0, managerLevel - currentLowerLevel);
+        
+        if (spreadPercent > 0) {
+            const overrideAmount = policy.premium * (spreadPercent / 100);
+            
+            const newOverride: OverrideRecord = {
+                id: `ovr-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                policyId: policy.id,
+                writingAgentId: writingAgent.id,
+                writingAgentName: writingAgent.name,
+                managerId: manager.id,
+                managerName: manager.name,
+                amount: overrideAmount,
+                percentage: spreadPercent,
+                premium: policy.premium,
+                carrier: policy.carrier,
+                product: policy.productName || 'Unknown Product',
+                timestamp: new Date().toISOString()
+            };
+            
+            overrides.push(newOverride);
+        }
+
+        // Move up the chain
+        currentLowerLevel = managerLevel;
+        currentManagerId = manager.parentId;
+    }
+
+    localStorage.setItem('arise_overrides_v1', JSON.stringify(overrides));
 };

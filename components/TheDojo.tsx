@@ -16,7 +16,7 @@ import {
     createChatSession,
     sendMessageToGemini
 } from '../services/geminiService';
-import { LiveServerMessage, LiveSession } from '@google/genai';
+import { LiveServerMessage } from '@google/genai';
 // Fix: Renamed DojoGoldenRebuttal to DojoGoldenRebuttals to match exported member in types.ts
 import { DojoScorecard, DojoMoment, DojoGoldenRebuttals } from '../types';
 import { ScriptLibrary } from './ScriptLibrary';
@@ -362,7 +362,7 @@ const TheDojo: React.FC = () => {
     const [scorecard, setScorecard] = useState<DojoScorecard | null>(null);
     const [isEvaluating, setIsEvaluating] = useState(false);
     
-    const sessionPromiseRef = useRef<Promise<LiveSession> | null>(null);
+    const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const outputNodeRef = useRef<GainNode | null>(null);
     const nextStartTimeRef = useRef<number>(0);

@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { quickSummarize } from '../services/geminiService';
-import { Client, PipelineStage, Policy, PolicyType, PolicyStatus, TeamMember } from '../types';
-import { Search, MapPin, Phone, Mail, FileText, ChevronRight, ArrowLeft, Plus, X, Save, NotebookPen, Sparkles, Loader2, Filter, ChevronDown, ArrowUpDown, DollarSign, Wallet, Calendar, ShieldCheck, Edit2, Cake, Trash2 } from 'lucide-react';
+import { Client, PipelineStage, Policy, PolicyType, PolicyStatus, TeamMember, Beneficiary } from '../types';
+import { Search, MapPin, Phone, Mail, FileText, ChevronRight, ArrowLeft, Plus, X, Save, NotebookPen, Sparkles, Loader2, Filter, ChevronDown, ArrowUpDown, DollarSign, Wallet, Calendar, ShieldCheck, Edit2, Cake, Trash2, Tag, Layers, Users, Activity, AlertCircle } from 'lucide-react';
 import { calculateCommissionExact } from '../services/commissionService';
 import { MOCK_TEAM } from '../services/mockData';
 
@@ -18,6 +17,33 @@ interface ClientsProps {
 const getLocalToday = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// Masking helpers for sensitive data
+const maskSSN = (ssn?: string) => {
+  if (!ssn) return 'N/A';
+  const digits = ssn.replace(/\D/g, '');
+  if (digits.length < 4) return ssn;
+  return `***-**-${digits.slice(-4)}`;
+};
+
+const maskAccount = (acc?: string) => {
+  if (!acc) return 'N/A';
+  if (acc.length < 4) return acc;
+  return `****${acc.slice(-4)}`;
+};
+
+const maskCard = (card?: string) => {
+  if (!card) return 'N/A';
+  const digits = card.replace(/\D/g, '');
+  if (digits.length < 4) return card;
+  return `**** **** **** ${digits.slice(-4)}`;
+};
+
+const getOrdinal = (n: number) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
 export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpdateClients, onSelectClient, selectedClient }) => {
@@ -68,6 +94,39 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
   // Helper to calculate total premium for sorting
   const getClientPremium = (client: Client) => client.policies.reduce((sum, p) => sum + p.premium, 0);
 
+  const getBeneficiaryTotals = (beneficiaries: Beneficiary[] = []) => {
+      const primary = beneficiaries.filter(b => b.type === 'Primary').reduce((sum, b) => sum + (Number(b.percentage) || 0), 0);
+      const contingent = beneficiaries.filter(b => b.type === 'Contingent').reduce((sum, b) => sum + (Number(b.percentage) || 0), 0);
+      return { primary, contingent };
+  };
+
+  const handleAddBeneficiary = () => {
+      if (!selectedClient) return;
+      const newBeneficiary: Beneficiary = {
+          id: `ben-${Date.now()}`,
+          clientId: selectedClient.id,
+          name: '',
+          relationship: '',
+          type: 'Primary',
+          percentage: 0
+      };
+      const currentBeneficiaries = editForm.beneficiaries || [];
+      setEditForm({ ...editForm, beneficiaries: [...currentBeneficiaries, newBeneficiary] });
+  };
+
+  const handleRemoveBeneficiary = (id: string) => {
+      const currentBeneficiaries = editForm.beneficiaries || [];
+      setEditForm({ ...editForm, beneficiaries: currentBeneficiaries.filter(b => b.id !== id) });
+  };
+
+  const handleUpdateBeneficiary = (id: string, updates: Partial<Beneficiary>) => {
+      const currentBeneficiaries = editForm.beneficiaries || [];
+      setEditForm({
+          ...editForm,
+          beneficiaries: currentBeneficiaries.map(b => b.id === id ? { ...b, ...updates } : b)
+      });
+  };
+
   const processedClients = clients
     .filter(c => {
         const matchesSearch = 
@@ -93,21 +152,22 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
   const handleAddClient = () => {
     if (!newClient.firstName || !newClient.lastName) return;
     
-    const client: Client = {
-        id: Date.now().toString(),
-        agentId: currentUserId,
-        firstName: newClient.firstName,
-        lastName: newClient.lastName,
-        email: newClient.email,
-        phone: newClient.phone,
-        address: 'Address Pending',
-        policies: [],
-        notes: 'New client added manually',
-        pipelineStage: PipelineStage.NEW_LEAD,
-        leadSource: 'Manual',
-        lastContactDate: getLocalToday(),
-        avatarUrl: `https://ui-avatars.com/api/?name=${newClient.firstName}+${newClient.lastName}&background=random`
-    };
+        const client: Client = {
+            id: Date.now().toString(),
+            agentId: currentUserId,
+            firstName: newClient.firstName,
+            lastName: newClient.lastName,
+            email: newClient.email,
+            phone: newClient.phone,
+            address: 'Address Pending',
+            policies: [],
+            beneficiaries: [],
+            notes: 'New client added manually',
+            pipelineStage: PipelineStage.NEW_LEAD,
+            leadSource: 'Manual',
+            lastContactDate: getLocalToday(),
+            avatarUrl: `https://ui-avatars.com/api/?name=${newClient.firstName}+${newClient.lastName}&background=random`
+        };
     
     onUpdateClients([client, ...clients]);
     setIsAddModalOpen(false);
@@ -376,13 +436,49 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                         />
                     ) : (selectedClient.dateOfBirth || 'DOB Pending')}
                 </div>
+                <div className="flex items-center">
+                    <Tag size={16} className="mr-1.5" /> 
+                    {isEditing ? (
+                        <input 
+                            className="border-b border-slate-600 focus:border-blue-500 outline-none bg-transparent text-white w-32"
+                            value={editForm.leadSource || ''}
+                            onChange={(e) => setEditForm({...editForm, leadSource: e.target.value})}
+                            placeholder="Lead Source"
+                        />
+                    ) : (selectedClient.leadSource || 'Source Pending')}
+                </div>
+                <div className="flex items-center">
+                    <Layers size={16} className="mr-1.5" /> 
+                    {isEditing ? (
+                        <select 
+                            className="border-b border-slate-600 focus:border-blue-500 outline-none bg-slate-900 text-white text-xs"
+                            value={editForm.leadType || ''}
+                            onChange={(e) => setEditForm({...editForm, leadType: e.target.value as any})}
+                        >
+                            <option value="">Type...</option>
+                            <option value="FEX">Final Expense</option>
+                            <option value="MP">Mortgage Protection</option>
+                            <option value="IUL">IUL / Wealth</option>
+                            <option value="VET">Veteran</option>
+                        </select>
+                    ) : (selectedClient.leadType || 'Type Pending')}
+                </div>
               </div>
             </div>
             <div className="flex gap-3">
                {isEditing ? (
                    <>
                        <button onClick={() => setIsEditing(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 font-medium transition-colors text-sm">Cancel</button>
-                       <button onClick={saveEdit} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors text-sm flex items-center gap-2">
+                       <button 
+                           onClick={saveEdit} 
+                           disabled={
+                               (editForm.beneficiaries || []).length > 0 && (
+                                   ((editForm.beneficiaries || []).some(b => b.type === 'Primary') && getBeneficiaryTotals(editForm.beneficiaries).primary !== 100) ||
+                                   ((editForm.beneficiaries || []).some(b => b.type === 'Contingent') && getBeneficiaryTotals(editForm.beneficiaries).contingent !== 100)
+                               )
+                           }
+                           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors text-sm flex items-center gap-2"
+                       >
                            <Save size={16} /> Save
                        </button>
                    </>
@@ -401,6 +497,502 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
 
           <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-6">
+                {/* Application Information Sections */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Personal Identification */}
+                    <div className="bg-slate-900/40 p-5 rounded-xl border border-white/5 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                            <ShieldCheck size={18} className="text-blue-500" />
+                            <h3 className="font-semibold text-white">Personal Identification</h3>
+                        </div>
+                        {isEditing ? (
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">SSN</label>
+                                    <input 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={editForm.ssn || ''}
+                                        onChange={(e) => setEditForm({...editForm, ssn: e.target.value})}
+                                        placeholder="XXX-XX-XXXX"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Driver's License</label>
+                                    <input 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={editForm.driversLicense || ''}
+                                        onChange={(e) => setEditForm({...editForm, driversLicense: e.target.value})}
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-slate-500 mb-1">Height</label>
+                                        <input 
+                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                            value={editForm.height || ''}
+                                            onChange={(e) => setEditForm({...editForm, height: e.target.value})}
+                                            placeholder="5'10''"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-500 mb-1">Weight (lbs)</label>
+                                        <input 
+                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                            value={editForm.weight || ''}
+                                            onChange={(e) => setEditForm({...editForm, weight: e.target.value})}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Occupation</label>
+                                    <input 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={editForm.occupation || ''}
+                                        onChange={(e) => setEditForm({...editForm, occupation: e.target.value})}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-y-3 text-sm">
+                                <div>
+                                    <p className="text-slate-500 text-xs">SSN</p>
+                                    <p className="text-slate-200 font-mono">{maskSSN(selectedClient.ssn)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 text-xs">Driver's License</p>
+                                    <p className="text-slate-200">{selectedClient.driversLicense || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 text-xs">Height / Weight</p>
+                                    <p className="text-slate-200">{selectedClient.height || '--'} / {selectedClient.weight || '--'} lbs</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 text-xs">Occupation</p>
+                                    <p className="text-slate-200">{selectedClient.occupation || 'N/A'}</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Beneficiary Information */}
+                    <div className="bg-slate-900/40 p-5 rounded-xl border border-white/5 space-y-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                                <Users size={18} className="text-blue-500" />
+                                <h3 className="font-semibold text-white">Beneficiary Information</h3>
+                            </div>
+                            {isEditing && (
+                                <button 
+                                    onClick={handleAddBeneficiary}
+                                    className="text-xs bg-blue-600/20 text-blue-400 px-2 py-1 rounded border border-blue-500/30 hover:bg-blue-600/30 transition-colors flex items-center gap-1"
+                                >
+                                    <Plus size={12} /> Add Beneficiary
+                                </button>
+                            )}
+                        </div>
+
+                        {isEditing ? (
+                            <div className="space-y-6">
+                                {/* Primary Group */}
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center">
+                                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Primary Beneficiaries</h4>
+                                        <span className={`text-xs font-mono ${(getBeneficiaryTotals(editForm.beneficiaries).primary === 100) ? 'text-green-400' : 'text-amber-400'}`}>
+                                            Total: {getBeneficiaryTotals(editForm.beneficiaries).primary}%
+                                        </span>
+                                    </div>
+                                    {(editForm.beneficiaries || []).filter(b => b.type === 'Primary').length === 0 && (
+                                        <p className="text-xs text-slate-600 italic">No primary beneficiaries added.</p>
+                                    )}
+                                    {(editForm.beneficiaries || []).filter(b => b.type === 'Primary').map((ben) => (
+                                        <div key={ben.id} className="bg-slate-950/50 p-3 rounded-lg border border-white/5 space-y-3 relative group">
+                                            <button 
+                                                onClick={() => handleRemoveBeneficiary(ben.id)}
+                                                className="absolute top-2 right-2 text-slate-600 hover:text-red-400 transition-colors"
+                                            >
+                                                <X size={14} />
+                                            </button>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Full Name</label>
+                                                    <input 
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.name}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { name: e.target.value })}
+                                                        placeholder="Beneficiary Name"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Relationship</label>
+                                                    <input 
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.relationship}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { relationship: e.target.value })}
+                                                        placeholder="e.g. Spouse"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Type</label>
+                                                    <select 
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.type}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { type: e.target.value as any })}
+                                                    >
+                                                        <option value="Primary">Primary</option>
+                                                        <option value="Contingent">Contingent</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Allocation (%)</label>
+                                                    <input 
+                                                        type="number"
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.percentage}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { percentage: Number(e.target.value) })}
+                                                        min="0"
+                                                        max="100"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Contingent Group */}
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center">
+                                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Contingent Beneficiaries</h4>
+                                        <span className={`text-xs font-mono ${(getBeneficiaryTotals(editForm.beneficiaries).contingent === 100) ? 'text-green-400' : 'text-amber-400'}`}>
+                                            Total: {getBeneficiaryTotals(editForm.beneficiaries).contingent}%
+                                        </span>
+                                    </div>
+                                    {(editForm.beneficiaries || []).filter(b => b.type === 'Contingent').length === 0 && (
+                                        <p className="text-xs text-slate-600 italic">No contingent beneficiaries added.</p>
+                                    )}
+                                    {(editForm.beneficiaries || []).filter(b => b.type === 'Contingent').map((ben) => (
+                                        <div key={ben.id} className="bg-slate-950/50 p-3 rounded-lg border border-white/5 space-y-3 relative group">
+                                            <button 
+                                                onClick={() => handleRemoveBeneficiary(ben.id)}
+                                                className="absolute top-2 right-2 text-slate-600 hover:text-red-400 transition-colors"
+                                            >
+                                                <X size={14} />
+                                            </button>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Full Name</label>
+                                                    <input 
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.name}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { name: e.target.value })}
+                                                        placeholder="Beneficiary Name"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Relationship</label>
+                                                    <input 
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.relationship}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { relationship: e.target.value })}
+                                                        placeholder="e.g. Spouse"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Type</label>
+                                                    <select 
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.type}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { type: e.target.value as any })}
+                                                    >
+                                                        <option value="Primary">Primary</option>
+                                                        <option value="Contingent">Contingent</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1 uppercase">Allocation (%)</label>
+                                                    <input 
+                                                        type="number"
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                        value={ben.percentage}
+                                                        onChange={(e) => handleUpdateBeneficiary(ben.id, { percentage: Number(e.target.value) })}
+                                                        min="0"
+                                                        max="100"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                
+                                {(getBeneficiaryTotals(editForm.beneficiaries).primary !== 100 || getBeneficiaryTotals(editForm.beneficiaries).contingent !== 100) && (
+                                    <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded flex items-center gap-2 text-amber-400 text-[10px]">
+                                        <AlertCircle size={14} />
+                                        <span>Allocations must sum to 100% for both Primary and Contingent groups.</span>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                {/* Primary View */}
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Primary</h4>
+                                        <span className="text-[10px] text-slate-400">{getBeneficiaryTotals(selectedClient.beneficiaries).primary}% Total</span>
+                                    </div>
+                                    {(!selectedClient.beneficiaries || selectedClient.beneficiaries.filter(b => b.type === 'Primary').length === 0) ? (
+                                        <p className="text-xs text-slate-600 italic">None listed.</p>
+                                    ) : (
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {selectedClient.beneficiaries.filter(b => b.type === 'Primary').map(ben => (
+                                                <div key={ben.id} className="bg-white/5 p-3 rounded-lg border border-white/5 flex justify-between items-center">
+                                                    <div>
+                                                        <p className="text-sm font-medium text-white">{ben.name}</p>
+                                                        <p className="text-xs text-slate-500">{ben.relationship}</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-sm font-mono text-blue-400">{ben.percentage}%</p>
+                                                        <p className="text-[10px] text-slate-600 uppercase">Allocation</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Contingent View */}
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Contingent</h4>
+                                        <span className="text-[10px] text-slate-400">{getBeneficiaryTotals(selectedClient.beneficiaries).contingent}% Total</span>
+                                    </div>
+                                    {(!selectedClient.beneficiaries || selectedClient.beneficiaries.filter(b => b.type === 'Contingent').length === 0) ? (
+                                        <p className="text-xs text-slate-600 italic">None listed.</p>
+                                    ) : (
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {selectedClient.beneficiaries.filter(b => b.type === 'Contingent').map(ben => (
+                                                <div key={ben.id} className="bg-white/5 p-3 rounded-lg border border-white/5 flex justify-between items-center">
+                                                    <div>
+                                                        <p className="text-sm font-medium text-white">{ben.name}</p>
+                                                        <p className="text-xs text-slate-500">{ben.relationship}</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-sm font-mono text-blue-400">{ben.percentage}%</p>
+                                                        <p className="text-[10px] text-slate-600 uppercase">Allocation</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Health Information */}
+                    <div className="bg-slate-900/40 p-5 rounded-xl border border-white/5 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                            <Activity size={18} className="text-blue-500" />
+                            <h3 className="font-semibold text-white">Health Information</h3>
+                        </div>
+                        {isEditing ? (
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Health Conditions</label>
+                                    <textarea 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                                        rows={2}
+                                        value={editForm.healthConditions || ''}
+                                        onChange={(e) => setEditForm({...editForm, healthConditions: e.target.value})}
+                                        placeholder="List any major health conditions..."
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Current Prescriptions</label>
+                                    <textarea 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                                        rows={2}
+                                        value={editForm.currentPrescriptions || ''}
+                                        onChange={(e) => setEditForm({...editForm, currentPrescriptions: e.target.value})}
+                                        placeholder="List current medications..."
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-3 text-sm">
+                                <div>
+                                    <p className="text-slate-500 text-xs">Conditions</p>
+                                    <p className="text-slate-200 line-clamp-2">{selectedClient.healthConditions || 'None reported'}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 text-xs">Prescriptions</p>
+                                    <p className="text-slate-200 line-clamp-2">{selectedClient.currentPrescriptions || 'None reported'}</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Payment Information */}
+                    <div className="bg-slate-900/40 p-5 rounded-xl border border-white/5 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                            <DollarSign size={18} className="text-blue-500" />
+                            <h3 className="font-semibold text-white">Payment Information</h3>
+                        </div>
+                        {isEditing ? (
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Payment Method</label>
+                                    <select 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={editForm.paymentMethod || ''}
+                                        onChange={(e) => setEditForm({...editForm, paymentMethod: e.target.value as any})}
+                                    >
+                                        <option value="">Select Method</option>
+                                        <option value="Bank Draft">Bank Draft</option>
+                                        <option value="Credit Card">Credit Card</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Draft Date</label>
+                                    <select 
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={editForm.draftDate || ''}
+                                        onChange={(e) => setEditForm({...editForm, draftDate: e.target.value})}
+                                    >
+                                        <option value="">Select Date</option>
+                                        {Array.from({ length: 28 }, (_, i) => i + 1).map(day => (
+                                            <option key={day} value={day.toString()}>
+                                                {getOrdinal(day)} of the month
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {editForm.paymentMethod === 'Bank Draft' && (
+                                    <div className="space-y-3 pt-2 border-t border-white/5 animate-fade-in">
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">Bank Name</label>
+                                            <input 
+                                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                value={editForm.bankName || ''}
+                                                onChange={(e) => setEditForm({...editForm, bankName: e.target.value})}
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">Routing Number</label>
+                                                <input 
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                    value={editForm.routingNumber || ''}
+                                                    onChange={(e) => setEditForm({...editForm, routingNumber: e.target.value})}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">Account Number</label>
+                                                <input 
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                    value={editForm.accountNumber || ''}
+                                                    onChange={(e) => setEditForm({...editForm, accountNumber: e.target.value})}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {editForm.paymentMethod === 'Credit Card' && (
+                                    <div className="space-y-3 pt-2 border-t border-white/5 animate-fade-in">
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">Card Number</label>
+                                            <input 
+                                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                value={editForm.cardNumber || ''}
+                                                onChange={(e) => setEditForm({...editForm, cardNumber: e.target.value})}
+                                                placeholder="XXXX XXXX XXXX XXXX"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div className="col-span-1">
+                                                <label className="block text-xs text-slate-500 mb-1">Exp Date</label>
+                                                <input 
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                    value={editForm.expirationDate || ''}
+                                                    onChange={(e) => setEditForm({...editForm, expirationDate: e.target.value})}
+                                                    placeholder="MM/YY"
+                                                />
+                                            </div>
+                                            <div className="col-span-1">
+                                                <label className="block text-xs text-slate-500 mb-1">CVV</label>
+                                                <input 
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                    value={editForm.cvv || ''}
+                                                    onChange={(e) => setEditForm({...editForm, cvv: e.target.value})}
+                                                    placeholder="123"
+                                                />
+                                            </div>
+                                            <div className="col-span-1">
+                                                <label className="block text-xs text-slate-500 mb-1">Zip Code</label>
+                                                <input 
+                                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                    value={editForm.billingZipCode || ''}
+                                                    onChange={(e) => setEditForm({...editForm, billingZipCode: e.target.value})}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-3 text-sm">
+                                <div>
+                                    <p className="text-slate-500 text-xs">Method</p>
+                                    <p className="text-slate-200">{selectedClient.paymentMethod || 'Not set'}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 text-xs">Draft Date</p>
+                                    <p className="text-slate-200">
+                                        {selectedClient.draftDate ? `${getOrdinal(parseInt(selectedClient.draftDate))} of the month` : 'Not set'}
+                                    </p>
+                                </div>
+                                {selectedClient.paymentMethod === 'Bank Draft' && (
+                                    <div className="grid grid-cols-2 gap-y-3 border-t border-white/5 pt-3">
+                                        <div>
+                                            <p className="text-slate-500 text-xs">Bank</p>
+                                            <p className="text-slate-200">{selectedClient.bankName || 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-slate-500 text-xs">Routing</p>
+                                            <p className="text-slate-200 font-mono">{selectedClient.routingNumber || 'N/A'}</p>
+                                        </div>
+                                        <div className="col-span-2">
+                                            <p className="text-slate-500 text-xs">Account Number</p>
+                                            <p className="text-slate-200 font-mono">{maskAccount(selectedClient.accountNumber)}</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {selectedClient.paymentMethod === 'Credit Card' && (
+                                    <div className="grid grid-cols-2 gap-y-3 border-t border-white/5 pt-3">
+                                        <div className="col-span-2">
+                                            <p className="text-slate-500 text-xs">Card Number</p>
+                                            <p className="text-slate-200 font-mono">{maskCard(selectedClient.cardNumber)}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-slate-500 text-xs">Expires</p>
+                                            <p className="text-slate-200">{selectedClient.expirationDate || 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-slate-500 text-xs">Billing Zip</p>
+                                            <p className="text-slate-200">{selectedClient.billingZipCode || 'N/A'}</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 <div className="flex justify-between items-center">
                     <h3 className="text-lg font-semibold text-white">Active Policies</h3>
                     <button 
@@ -471,7 +1063,8 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                       {policy.status}
                                   </span>
                               </div>
-                              <div className="mt-4 flex items-center justify-between text-sm text-slate-400 border-b border-white/5 pb-4 mb-4">
+                               <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 border-b border-white/5 pb-4 mb-4">
+                                   <div className="flex justify-between items-center">
                                   <div>
                                       <span className="text-slate-500">Term:</span> {policy.startDate} - {policy.endDate}
                                   </div>
@@ -740,6 +1333,24 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                 </div>
                             </div>
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Draft Date</label>
+                                <select 
+                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
+                                    value={editingPolicy.draftDate || ''}
+                                    onChange={(e) => setEditingPolicy({...editingPolicy, draftDate: e.target.value})}
+                                >
+                                    <option value="">Select Date</option>
+                                    {Array.from({ length: 28 }, (_, i) => i + 1).map(day => (
+                                        <option key={day} value={day.toString()}>
+                                            {getOrdinal(day)} of the month
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
                         {editingPolicy.type === PolicyType.TERM && (
                             <div>
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Term Length (Years)</label>
@@ -826,7 +1437,6 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
   // --- List View (Default) ---
   return (
     <div className="animate-fade-in space-y-6">
-      {/* ... existing code ... */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-white text-shadow-sm">My Contacts</h2>
         <div className="flex gap-2">

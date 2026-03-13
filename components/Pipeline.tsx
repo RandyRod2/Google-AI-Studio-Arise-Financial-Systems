@@ -1,9 +1,8 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { PipelineStage, Client, Policy, PolicyType, PolicyStatus, TeamMember } from '../types';
-import { MoreHorizontal, Plus, Calendar as CalendarIcon, X, ChevronRight, ChevronLeft, Phone, MapPin, Edit2, Save, Cake, GripVertical, Upload, ArrowRight, FileSpreadsheet, CheckCircle2, Filter, BookOpen, Clock, Tag, ShieldCheck, DollarSign, Sparkles } from 'lucide-react';
+import { MoreHorizontal, Plus, Calendar as CalendarIcon, X, ChevronRight, ChevronLeft, Phone, MapPin, Edit2, Save, Cake, GripVertical, Upload, ArrowRight, FileSpreadsheet, CheckCircle2, Filter, BookOpen, Clock, Tag, ShieldCheck, DollarSign, Sparkles, ChevronDown } from 'lucide-react';
 import { ScriptLibrary } from './ScriptLibrary';
-import { getAvailableCarriers, getAvailableProducts, calculateCommissionExact } from '../services/commissionService';
+import { getAvailableCarriers, getAvailableProducts, calculateCommissionExact, getCommissionRate } from '../services/commissionService';
 import { MOCK_TEAM } from '../services/mockData';
 
 // Helper for local date string
@@ -49,6 +48,11 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
       termLength: number;
       status: PolicyStatus;
       commission: string;
+      commissionRate: string;
+      commissionType: 'Advanced (Upfront)' | 'As Earned (Monthly)';
+      advanceRate: string;
+      writingAgentId: string;
+      notes: string;
   }>({
       carrier: '',
       policyType: PolicyType.TERM,
@@ -60,12 +64,25 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
       submittedDate: getLocalToday(),
       termLength: 20,
       status: PolicyStatus.PENDING,
-      commission: ''
+      commission: '',
+      commissionRate: '',
+      commissionType: 'Advanced (Upfront)',
+      advanceRate: '75',
+      writingAgentId: currentUserId,
+      notes: ''
   });
   
   const [monthlyInput, setMonthlyInput] = useState<string>('');
   const [carrierOptions, setCarrierOptions] = useState<string[]>([]);
   const [productOptions, setProductOptions] = useState<string[]>([]);
+
+  // Load team members for writing agent selection
+  const [teamMembers] = useState<TeamMember[]>(() => {
+    try {
+        const saved = localStorage.getItem('arise_team_members');
+        return saved ? JSON.parse(saved) : MOCK_TEAM;
+    } catch { return MOCK_TEAM; }
+  });
   
   // Current User State for Contract Levels
   const [currentUser] = useState<TeamMember>(() => {
@@ -91,13 +108,13 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
       }
   }, [policyForm.carrier]);
 
-  // --- Auto-Calculate Commission Effect ---
+  // --- Auto-Calculate Commission & Advance Fields Effect ---
   useEffect(() => {
       if (!isPolicyModalOpen) return;
 
       const premium = parseFloat(policyForm.premium);
       // Only calculate if we have valid numbers and selections
-      if (isNaN(premium) || premium === 0 || !policyForm.carrier || !policyForm.productName) {
+      if (!policyForm.carrier || !policyForm.productName) {
           return;
       }
 
@@ -107,13 +124,28 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
       // Determine Comp Level: Check for override, else use default
       const compLevel = currentUser.carrierCompLevels?.[carrier] || currentUser.defaultCompLevel || 100;
 
-      // Calculate
-      const { total } = calculateCommissionExact(carrier, product, premium, compLevel);
+      // Get metadata from registry
+      const rateInfo = getCommissionRate(carrier, product, compLevel);
+      const { total, fycRate } = calculateCommissionExact(carrier, product, isNaN(premium) ? 0 : premium, compLevel);
       
-      // Update form
+      // Map registry advanceRate to UI fields
+      let commType: 'Advanced (Upfront)' | 'As Earned (Monthly)' = 'Advanced (Upfront)';
+      let advRate = '75';
+
+      if (rateInfo.advanceRate === 'Paid as Earned') {
+          commType = 'As Earned (Monthly)';
+          advRate = '0';
+      } else if (rateInfo.advanceRate) {
+          advRate = rateInfo.advanceRate.replace('%', '');
+      }
+
+      // Update form with auto-filled values
       setPolicyForm(prev => ({
           ...prev,
-          commission: total.toFixed(2)
+          commission: total.toFixed(2),
+          commissionRate: (fycRate * 100).toFixed(0),
+          commissionType: commType,
+          advanceRate: advRate
       }));
 
   }, [policyForm.carrier, policyForm.productName, policyForm.premium, isPolicyModalOpen, currentUser]);
@@ -210,7 +242,12 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
               submittedDate: getLocalToday(),
               termLength: 20,
               status: defaultStatus,
-              commission: ''
+              commission: '',
+              commissionRate: '',
+              commissionType: 'Advanced (Upfront)',
+              advanceRate: '75',
+              writingAgentId: currentUserId,
+              notes: ''
           });
           setMonthlyInput('');
           setIsPolicyModalOpen(true);
@@ -321,11 +358,16 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
           premium: annualPremium,
           coverageAmount: parseFloat(policyForm.coverageAmount) || 0,
           commission: isNaN(manualCommission) ? estimatedCommission : manualCommission,
+          commissionRate: parseFloat(policyForm.commissionRate) || 0,
+          commissionType: policyForm.commissionType,
+          advanceRate: parseFloat(policyForm.advanceRate) || 0,
+          writingAgentId: policyForm.writingAgentId,
           startDate: policyForm.startDate,
           submittedDate: policyForm.submittedDate,
           endDate: calculatedEndDate, 
           status: finalStatus,
-          isPaidOut: finalStatus === PolicyStatus.ACTIVE // Assume active policies are paid/issued
+          isPaidOut: finalStatus === PolicyStatus.ACTIVE, // Assume active policies are paid/issued
+          draftDate: policyForm.startDate // Ensure Draft Date matches Policy Start Date
       };
 
       // 2. Update Client (Add Policy & Change Stage)
@@ -563,6 +605,8 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
     setCsvHeaders([]);
   };
 
+  const numInputClass = "w-full p-2 border border-slate-700 rounded-lg text-sm bg-slate-950 text-white focus:ring-2 focus:ring-indigo-500 outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
   return (
     <div className="h-full flex flex-col animate-fade-in relative">
       <div className="flex justify-between items-center mb-6">
@@ -676,15 +720,22 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                          <span className="font-bold text-white text-sm truncate max-w-[140px] block" title={`${client.firstName} ${client.lastName}`}>
                             {client.firstName} {client.lastName}
                          </span>
-                         {client.leadType && (
-                             <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border 
-                                ${client.leadType === 'FEX' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
-                                  client.leadType === 'MP' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
-                                  client.leadType === 'IUL' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                  'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
-                                 {client.leadType}
-                             </span>
-                         )}
+                         <div className="flex flex-col items-end gap-1">
+                             {client.leadSource && (
+                                 <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter truncate max-w-[80px]" title={client.leadSource}>
+                                     {client.leadSource}
+                                 </span>
+                             )}
+                             {client.leadType && (
+                                 <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border 
+                                    ${client.leadType === 'FEX' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
+                                      client.leadType === 'MP' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
+                                      client.leadType === 'IUL' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                      'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
+                                     {client.leadType}
+                                 </span>
+                             )}
+                         </div>
                       </div>
 
                       {/* Contact Details */}
@@ -834,60 +885,105 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                   </div>
                   
                   <div className="p-6 space-y-4 overflow-y-auto">
-                      <p className="text-sm text-blue-200 mb-4 bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg">
-                          Enter the application details to move this lead to <b>{pendingPolicyMove?.stage}</b>. This will automatically add them to your Book of Business and Applications list.
-                      </p>
-
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Carrier</label>
-                              {carrierOptions.length > 0 ? (
-                                  <select 
-                                      className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
-                                      value={policyForm.carrier}
-                                      onChange={(e) => setPolicyForm({...policyForm, carrier: e.target.value})}
-                                  >
-                                      <option value="">Select Carrier...</option>
-                                      {carrierOptions.map(c => <option key={c} value={c}>{c}</option>)}
-                                  </select>
-                              ) : (
-                                  <input 
-                                      type="text" 
-                                      className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
-                                      placeholder="e.g. Mutual of Omaha"
-                                      value={policyForm.carrier}
-                                      onChange={(e) => setPolicyForm({...policyForm, carrier: e.target.value})}
-                                  />
-                              )}
+                              <select 
+                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                  value={policyForm.carrier}
+                                  onChange={(e) => setPolicyForm({...policyForm, carrier: e.target.value})}
+                              >
+                                  <option value="">Select Carrier...</option>
+                                  {carrierOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
                           </div>
                           <div>
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Product</label>
-                              {productOptions.length > 0 ? (
-                                  <select 
-                                      className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
-                                      value={policyForm.productName}
-                                      onChange={(e) => setPolicyForm({...policyForm, productName: e.target.value})}
-                                  >
-                                      <option value="">Select Product...</option>
-                                      {productOptions.map(p => <option key={p} value={p}>{p}</option>)}
-                                  </select>
-                              ) : (
-                                  <input 
-                                      type="text" 
-                                      className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
-                                      placeholder="e.g. Living Promise"
-                                      value={policyForm.productName}
-                                      onChange={(e) => setPolicyForm({...policyForm, productName: e.target.value})}
-                                  />
-                              )}
+                              <select 
+                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                  value={policyForm.productName}
+                                  onChange={(e) => setPolicyForm({...policyForm, productName: e.target.value})}
+                              >
+                                  <option value="">Select Product...</option>
+                                  {productOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                              </select>
                           </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Annual Premium ($)</label>
+                              <input 
+                                  type="number"
+                                  className={numInputClass}
+                                  value={policyForm.premium}
+                                  onChange={handleAnnualChange}
+                                  placeholder="2400.00"
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Commission Rate (%)</label>
+                              <input 
+                                  type="number"
+                                  className={numInputClass}
+                                  value={policyForm.commissionRate}
+                                  onChange={(e) => setPolicyForm({...policyForm, commissionRate: e.target.value})}
+                                  placeholder="120"
+                              />
+                          </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Commission Type</label>
+                              <div className="relative">
+                                  <select 
+                                      className="w-full appearance-none border border-slate-700 rounded-lg p-2 pr-8 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                      value={policyForm.commissionType}
+                                      onChange={(e) => setPolicyForm({...policyForm, commissionType: e.target.value as any})}
+                                  >
+                                      <option value="Advanced (Upfront)">Advanced (Upfront)</option>
+                                      <option value="As Earned (Monthly)">As Earned (Monthly)</option>
+                                  </select>
+                                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={16} />
+                              </div>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Advance Rate (%)</label>
+                              <input 
+                                  type="number"
+                                  className={numInputClass}
+                                  value={policyForm.advanceRate}
+                                  onChange={(e) => setPolicyForm({...policyForm, advanceRate: e.target.value})}
+                                  placeholder="75"
+                              />
+                          </div>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Writing Agent</label>
+                          <div className="relative">
+                              <select 
+                                  className="w-full appearance-none border border-slate-700 rounded-lg p-2 pr-8 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                  value={policyForm.writingAgentId}
+                                  onChange={(e) => setPolicyForm({...policyForm, writingAgentId: e.target.value})}
+                              >
+                                  {teamMembers.map(m => (
+                                      <option key={m.id} value={m.id}>
+                                          {m.name}
+                                      </option>
+                                  ))}
+                              </select>
+                              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={16} />
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-1">The agent who will receive commission when this policy is issued</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Policy Type</label>
                               <select 
-                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
+                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
                                   value={policyForm.policyType}
                                   onChange={(e) => setPolicyForm({...policyForm, policyType: e.target.value as PolicyType})}
                               >
@@ -938,7 +1034,7 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Submitted Date</label>
                               <input 
                                   type="date"
-                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
+                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
                                   value={policyForm.submittedDate}
                                   onChange={(e) => setPolicyForm({...policyForm, submittedDate: e.target.value})}
                               />
@@ -947,7 +1043,7 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Start Date</label>
                               <input 
                                   type="date"
-                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
+                                  className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
                                   value={policyForm.startDate}
                                   onChange={(e) => setPolicyForm({...policyForm, startDate: e.target.value})}
                               />
@@ -1018,6 +1114,17 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                           </p>
                       </div>
                       
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notes</label>
+                          <textarea 
+                              className="w-full border border-slate-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-slate-950 text-white"
+                              rows={4}
+                              placeholder="Additional notes about this policy..."
+                              value={policyForm.notes}
+                              onChange={(e) => setPolicyForm({...policyForm, notes: e.target.value})}
+                          />
+                      </div>
+
                       <div className="pt-2 flex gap-3">
                           <button 
                               onClick={() => { setIsPolicyModalOpen(false); setPendingPolicyMove(null); }}
@@ -1028,7 +1135,7 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                           <button 
                               onClick={handleSavePolicyMove}
                               disabled={!policyForm.carrier || !policyForm.premium}
-                              className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              className="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                           >
                               <Save size={16} /> Save & Move Lead
                           </button>
@@ -1041,7 +1148,7 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
       {/* Add Lead Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-slate-950/80 backdrop-blur-md">
-            <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-md ring-1 ring-white/10 flex flex-col max-h-[90vh]">
+            <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-md flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-xl shrink-0">
                     <h3 className="font-bold text-white">Add New Lead</h3>
                     <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-white">
@@ -1105,6 +1212,126 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                         className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors mt-2"
                     >
                         Create Lead
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Edit Lead Modal */}
+      {isEditModalOpen && editingClient && (
+        <div className="fixed inset-0 flex items-center justify-center z-[110] p-4 bg-slate-950/80 backdrop-blur-md">
+            <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-md flex flex-col max-h-[90vh] animate-fade-in">
+                <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-xl shrink-0">
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                        <Edit2 size={18} className="text-indigo-500" /> Edit Lead
+                    </h3>
+                    <button onClick={() => { setIsEditModalOpen(false); setEditingClient(null); }} className="text-slate-400 hover:text-white">
+                        <X size={20} />
+                    </button>
+                </div>
+                <div className="p-6 space-y-4 bg-slate-900 overflow-y-auto">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">First Name</label>
+                            <input 
+                                type="text" 
+                                className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                value={editingClient.firstName}
+                                onChange={(e) => setEditingClient({...editingClient, firstName: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Last Name</label>
+                            <input 
+                                type="text" 
+                                className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                value={editingClient.lastName}
+                                onChange={(e) => setEditingClient({...editingClient, lastName: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Email</label>
+                            <input 
+                                type="email" 
+                                className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                value={editingClient.email}
+                                onChange={(e) => setEditingClient({...editingClient, email: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Phone</label>
+                            <input 
+                                type="tel" 
+                                className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                value={editingClient.phone}
+                                onChange={(e) => setEditingClient({...editingClient, phone: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Date of Birth</label>
+                            <input 
+                                type="date" 
+                                className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white [color-scheme:dark]"
+                                value={editingClient.dateOfBirth || ''}
+                                onChange={(e) => setEditingClient({...editingClient, dateOfBirth: e.target.value})}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Lead Type</label>
+                            <select 
+                                className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                                value={editingClient.leadType || 'FEX'}
+                                onChange={(e) => setEditingClient({...editingClient, leadType: e.target.value as any})}
+                            >
+                                <option value="FEX">Final Expense</option>
+                                <option value="MP">Mortgage Protection</option>
+                                <option value="IUL">IUL / Wealth</option>
+                                <option value="VET">Veteran Benefits</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Lead Source</label>
+                        <input 
+                            type="text" 
+                            className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                            value={editingClient.leadSource || ''}
+                            onChange={(e) => setEditingClient({...editingClient, leadSource: e.target.value})}
+                            placeholder="e.g. Facebook Ad, Referral..."
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Address / State</label>
+                        <input 
+                            type="text" 
+                            className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                            value={editingClient.address}
+                            onChange={(e) => setEditingClient({...editingClient, address: e.target.value})}
+                            placeholder="e.g. 123 Maple St, TX"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Current Pipeline Stage</label>
+                        <select 
+                            className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-950 text-white"
+                            value={editingClient.pipelineStage}
+                            onChange={(e) => setEditingClient({...editingClient, pipelineStage: e.target.value as PipelineStage})}
+                        >
+                            {Object.values(PipelineStage).map(s => (
+                                <option key={s} value={s}>{s}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <button 
+                        onClick={handleSaveEdit}
+                        className="w-full py-3 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 transition-colors mt-2 flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/20"
+                    >
+                        <Save size={18} /> Save Changes
                     </button>
                 </div>
             </div>
@@ -1175,7 +1402,7 @@ const Pipeline: React.FC<PipelineProps> = ({ clients, currentUserId, onUpdateCli
                                                 {field.replace(/([A-Z])/g, ' $1').trim()}
                                             </label>
                                             <select 
-                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                                                 value={fieldMapping[field]}
                                                 onChange={(e) => setFieldMapping({...fieldMapping, [field]: e.target.value})}
                                             >

@@ -3,7 +3,7 @@ import React from 'react';
 
 export type Role = 'ADMIN' | 'AGENCY_OWNER' | 'MANAGER' | 'AGENT' | 'RECRUIT' | 'STAFF';
 
-export type SubscriptionStatus = 'active' | 'past_due' | 'cancelled' | 'trial';
+export type SubscriptionStatus = 'active' | 'past_due' | 'cancelled' | 'trial' | 'pending_invite';
 export type SubscriptionPlan = 'starter' | 'professional' | 'enterprise';
 
 export enum PolicyType {
@@ -46,6 +46,10 @@ export interface Policy {
   premium: number;
   coverageAmount: number;
   commission: number;
+  commissionRate?: number;
+  commissionType?: 'Advanced (Upfront)' | 'As Earned (Monthly)';
+  advanceRate?: number;
+  writingAgentId?: string;
   startDate: string;
   submittedDate?: string;
   draftDate?: string;
@@ -53,6 +57,15 @@ export interface Policy {
   status: PolicyStatus;
   isPaidOut?: boolean;
   documentUrl?: string;
+}
+
+export interface Beneficiary {
+  id: string;
+  clientId: string;
+  name: string;
+  relationship: string;
+  type: 'Primary' | 'Contingent';
+  percentage: number;
 }
 
 export interface Client {
@@ -71,6 +84,31 @@ export interface Client {
   leadSource: string;
   leadType?: 'FEX' | 'MP' | 'IUL' | 'VET';
   lastContactDate: string;
+  
+  // Personal Identification
+  ssn?: string;
+  driversLicense?: string;
+  height?: string;
+  weight?: string;
+  occupation?: string;
+
+  // Beneficiary Information
+  beneficiaries?: Beneficiary[];
+
+  // Health Information
+  healthConditions?: string;
+  currentPrescriptions?: string;
+
+  // Payment Information
+  paymentMethod?: 'Bank Draft' | 'Credit Card';
+  bankName?: string;
+  routingNumber?: string;
+  accountNumber?: string;
+  cardNumber?: string;
+  expirationDate?: string;
+  cvv?: string;
+  billingZipCode?: string;
+  draftDate?: string;
 }
 
 export interface Application {
@@ -79,6 +117,7 @@ export interface Application {
   clientName: string;
   carrier: string;
   product: string;
+  policyType?: PolicyType;
   policyNumber?: string;
   submittedDate: string;
   policyStartDate?: string;
@@ -254,6 +293,8 @@ export interface CommissionRule {
   excess?: number;
   advanceMonths?: number;
   advanceCap?: number;
+  advanceRate?: 'Paid as Earned' | '50%' | '75%' | '100%';
+  chargebackPeriod?: '6mo' | '9mo' | '12mo';
 }
 
 export interface CommissionRegistry {
@@ -333,4 +374,36 @@ export interface RevenueForecast {
   d7: ForecastPeriod;
   d30: ForecastPeriod;
   d90: ForecastPeriod;
+}
+
+/**
+ * Fix: Added missing Expense interface which was imported in Financial.tsx but not defined.
+ */
+export interface Expense {
+  id: string;
+  category: string;
+  date: string;
+  description: string;
+  amount: number;
+  isRecurring: boolean;
+  frequency: 'Weekly' | 'Monthly' | 'Yearly';
+  notes: string;
+}
+
+/**
+ * Fix: Added missing OverrideRecord interface which was imported in Financial.tsx, ManagerDashboard.tsx, ManagerOverrides.tsx, and commissionService.ts.
+ */
+export interface OverrideRecord {
+  id: string;
+  policyId: string;
+  writingAgentId: string;
+  writingAgentName: string;
+  managerId: string;
+  managerName: string;
+  amount: number;
+  percentage: number;
+  premium: number;
+  carrier: string;
+  product: string;
+  timestamp: string;
 }

@@ -39,23 +39,14 @@ import TheDojo from './components/TheDojo';
 import Recruits from './components/Recruits';
 import ProductCommission from './components/ProductCommission'; 
 import { AriseLogo } from './components/AriseLogo';
-import { ViewState, Client, Role, UserProfile, User, Application, Policy, PolicyStatus, PolicyType, PipelineStage, TeamMember } from './types';
+import { ViewState, Client, Role, UserProfile, User, Application, Policy, PolicyStatus, PolicyType, PipelineStage, TeamMember, Recruit } from './types';
 import { MOCK_CLIENTS, MOCK_APPLICATIONS, MOCK_TEAM } from './services/mockData';
-import { calculateCommissionExact } from './services/commissionService';
+import { calculateCommissionExact, processPolicyOverrides } from './services/commissionService';
 
 // Helper to get local date string YYYY-MM-DD
 const getLocalToday = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
-// Helper to retrieve agent profile for commission calcs
-const getAgentProfile = (userId: string): TeamMember => {
-    try {
-        const saved = localStorage.getItem('arise_team_members');
-        const members = saved ? JSON.parse(saved) : MOCK_TEAM;
-        return members.find((m: any) => m.id === userId) || MOCK_TEAM[0];
-    } catch { return MOCK_TEAM[0]; }
 };
 
 // Extracted Navigation Components to prevent re-rendering issues
@@ -125,6 +116,25 @@ const App: React.FC = () => {
       }
   });
 
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => {
+      try {
+          const saved = localStorage.getItem('arise_team_members');
+          return saved ? JSON.parse(saved) : MOCK_TEAM;
+      } catch (e) {
+          return MOCK_TEAM;
+      }
+  });
+
+  const [recruits, setRecruits] = useState<Recruit[]>(() => {
+    try {
+        const saved = localStorage.getItem('arise_recruits');
+        return saved ? JSON.parse(saved) : [
+            { id: 'r1', name: 'David Wallace', source: 'LinkedIn', stage: 'Interview', dateAdded: '2024-10-01', notes: 'Strong sales background.', email: 'david.wallace@example.com' },
+            { id: 'r2', name: 'Karen Filippelli', source: 'Referral', stage: 'Licensing', dateAdded: '2024-09-25', notes: 'Scheduled for exam.', email: 'karen.f@example.com' },
+        ];
+    } catch (e) { return []; }
+  });
+
   useEffect(() => {
       if (currentUser) {
           try {
@@ -149,53 +159,51 @@ const App: React.FC = () => {
       localStorage.setItem('arise_applications_v1', JSON.stringify(applications));
   }, [applications]);
 
+  useEffect(() => {
+      localStorage.setItem('arise_recruits', JSON.stringify(recruits));
+  }, [recruits]);
+
+  useEffect(() => {
+      localStorage.setItem('arise_team_members', JSON.stringify(teamMembers));
+  }, [teamMembers]);
+
   // watchman background script for renewals and status updates
   useEffect(() => {
-      const today = new Date();
       const todayStr = getLocalToday();
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(today.getDate() + 30);
 
       let clientsChanged = false;
-      let appsChanged = false;
 
       const updatedClients = clients.map(client => {
           let clientModified = false;
           let policyActivated = false;
 
-          // 1. Automated Status Check (Activate Pending/Approved policies that reached start date)
           const updatedPolicies = client.policies.map(policy => {
               if ((policy.status === PolicyStatus.PENDING || policy.status === PolicyStatus.APPROVED) && policy.startDate && policy.startDate <= todayStr) {
                   clientModified = true;
                   policyActivated = true;
-                  return { ...policy, status: PolicyStatus.ACTIVE, isPaidOut: true };
+                  const activatedPolicy = { ...policy, status: PolicyStatus.ACTIVE, isPaidOut: true };
+                  // Trigger Override Calculation Automation on Auto-Activation
+                  processPolicyOverrides(activatedPolicy, client.agentId, teamMembers);
+                  return activatedPolicy;
               }
               return policy;
           });
 
-          // 2. Automated Retention Engine (The "Watchman")
-          // Logic: If any policy is 30 days away from an annual anniversary, move to Renewal Review
           const isNearRenewal = client.policies.some(policy => {
               if (policy.status !== PolicyStatus.ACTIVE) return false;
-              
+              const today = new Date();
               const startDate = new Date(policy.startDate);
-              // Calculate the anniversary this year or next year
               const anniversary = new Date(startDate);
               anniversary.setFullYear(today.getFullYear());
-              
-              // If the anniversary for this year has passed, look at next year's anniversary
               if (anniversary < today) {
                   anniversary.setFullYear(today.getFullYear() + 1);
               }
-              
               const diffTime = anniversary.getTime() - today.getTime();
               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-              
               return diffDays >= 0 && diffDays <= 30;
           });
 
           let newStage = client.pipelineStage;
-          
           if (policyActivated) {
               if (client.pipelineStage === PipelineStage.APPLICATION_TAKEN || client.pipelineStage === PipelineStage.UNDERWRITING) {
                   newStage = PipelineStage.ISSUED;
@@ -203,7 +211,6 @@ const App: React.FC = () => {
               }
           }
 
-          // Move to Renewal Review if flagged and not already in a service/review stage
           if (isNearRenewal && client.pipelineStage !== PipelineStage.RENEWAL_REVIEW) {
               newStage = PipelineStage.RENEWAL_REVIEW;
               clientModified = true;
@@ -216,26 +223,9 @@ const App: React.FC = () => {
           return client;
       });
 
-      const updatedApps = applications.map(app => {
-          const client = updatedClients.find(c => c.id === app.clientId);
-          if (!client) return app;
-
-          const policy = client.policies.find(p => 
-              (p.applicationId === app.id) || 
-              (p.carrier === app.carrier && p.productName === app.product)
-          );
-
-          if (policy && policy.status === PolicyStatus.ACTIVE && app.status !== 'Issued') {
-              appsChanged = true;
-              return { ...app, status: 'Issued' };
-          }
-          return app;
-      });
-
       if (clientsChanged) setClients(updatedClients);
-      if (appsChanged) setApplications(updatedApps as Application[]);
 
-  }, []);
+  }, [clients, teamMembers]);
 
   const userProfile: UserProfile = currentUser ? {
       name: currentUser.name,
@@ -257,6 +247,10 @@ const App: React.FC = () => {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+
+  const getAgentProfile = (userId: string): TeamMember => {
+    return teamMembers.find((m: any) => m.id === userId) || teamMembers[0];
+  };
 
   const mapProductToPolicyType = (productName: string): PolicyType => {
       const lower = productName.toLowerCase();
@@ -286,22 +280,19 @@ const App: React.FC = () => {
       let shouldUpdateClient = false;
 
       const existingPolicyIndex = updatedPolicies.findIndex(p => p.applicationId === updatedApp.id);
-
       const newStatus = updatedApp.status === 'Declined' ? PolicyStatus.CANCELLED : 
                         updatedApp.status === 'Approved' ? PolicyStatus.APPROVED : 
                         updatedApp.status === 'Issued' ? PolicyStatus.ACTIVE :
                         PolicyStatus.PENDING;
-      
       const isNowPaid = updatedApp.status === 'Issued';
 
       if (existingPolicyIndex > -1) {
           const existingPolicy = updatedPolicies[existingPolicyIndex];
-          
           updatedPolicies[existingPolicyIndex] = {
               ...existingPolicy,
               carrier: updatedApp.carrier,
               productName: updatedApp.product,
-              type: mapProductToPolicyType(updatedApp.product), 
+              type: updatedApp.policyType || existingPolicy.type || mapProductToPolicyType(updatedApp.product), // Respect explicit policyType if provided
               premium: updatedApp.premium,
               coverageAmount: updatedApp.coverageAmount || existingPolicy.coverageAmount,
               status: newStatus,
@@ -310,12 +301,16 @@ const App: React.FC = () => {
               submittedDate: updatedApp.submittedDate || existingPolicy.submittedDate,
               commission: commissionAmt 
           };
+          
+          if (isNowPaid) {
+              processPolicyOverrides(updatedPolicies[existingPolicyIndex], client.agentId, teamMembers);
+          }
           shouldUpdateClient = true;
       } else if (updatedApp.status === 'Approved' || updatedApp.status === 'Issued') {
           const newPolicy: Policy = {
               id: `pol-${Date.now()}`,
               applicationId: updatedApp.id,
-              type: mapProductToPolicyType(updatedApp.product),
+              type: updatedApp.policyType || mapProductToPolicyType(updatedApp.product), // Respect explicit policyType
               productName: updatedApp.product,
               policyNumber: updatedApp.policyNumber || 'PENDING-ISSUE', 
               carrier: updatedApp.carrier,
@@ -330,11 +325,13 @@ const App: React.FC = () => {
               documentUrl: updatedApp.documentUrl
           };
           updatedPolicies = [newPolicy, ...updatedPolicies];
+          if (isNowPaid) {
+              processPolicyOverrides(newPolicy, client.agentId, teamMembers);
+          }
           shouldUpdateClient = true;
       }
 
       let newStage = client.pipelineStage;
-      
       if (updatedApp.status === 'Issued') {
           newStage = PipelineStage.ISSUED;
       } else if (updatedApp.status === 'Underwriting') {
@@ -352,19 +349,11 @@ const App: React.FC = () => {
       }
 
       if (shouldUpdateClient) {
-          const updatedClient = { 
-              ...client, 
-              policies: updatedPolicies, 
-              pipelineStage: newStage 
-          };
-          
+          const updatedClient = { ...client, policies: updatedPolicies, pipelineStage: newStage };
           const newClientsList = [...clients];
           newClientsList[clientIndex] = updatedClient;
           setClients(newClientsList);
-
-          if (selectedClient && selectedClient.id === updatedClient.id) {
-              setSelectedClient(updatedClient);
-          }
+          if (selectedClient && selectedClient.id === updatedClient.id) setSelectedClient(updatedClient);
       }
   };
 
@@ -385,25 +374,21 @@ const App: React.FC = () => {
 
       updatedClients.forEach(updatedClient => {
           const previousClient = clients.find(c => c.id === updatedClient.id);
-          
-          const isHighIntentStage = updatedClient.pipelineStage === PipelineStage.APPLICATION_TAKEN || updatedClient.pipelineStage === PipelineStage.UNDERWRITING;
+          const isHighIntentStage = 
+              updatedClient.pipelineStage === PipelineStage.APPLICATION_TAKEN || 
+              updatedClient.pipelineStage === PipelineStage.UNDERWRITING ||
+              updatedClient.pipelineStage === PipelineStage.ISSUED;
+
           const policyCountIncreased = (updatedClient.policies.length > (previousClient?.policies.length || 0));
           
           if (previousClient && isHighIntentStage && policyCountIncreased) {
               const latestPolicy = updatedClient.policies[0];
-              
               if (latestPolicy) {
                   let appStatus: Application['status'] = 'Submitted'; 
-                  
-                  if (latestPolicy.status === PolicyStatus.ACTIVE) {
-                      appStatus = 'Issued';
-                  } else if (latestPolicy.status === PolicyStatus.APPROVED) {
-                      appStatus = 'Approved'; 
-                  } else if (latestPolicy.status === PolicyStatus.CANCELLED) {
-                      appStatus = 'Declined';
-                  } else if (updatedClient.pipelineStage === PipelineStage.UNDERWRITING) {
-                      appStatus = 'Underwriting';
-                  }
+                  if (latestPolicy.status === PolicyStatus.ACTIVE) appStatus = 'Issued';
+                  else if (latestPolicy.status === PolicyStatus.APPROVED) appStatus = 'Approved'; 
+                  else if (latestPolicy.status === PolicyStatus.CANCELLED) appStatus = 'Declined';
+                  else if (updatedClient.pipelineStage === PipelineStage.UNDERWRITING) appStatus = 'Underwriting';
 
                   const newApp: Application = {
                       id: `auto-app-${Date.now()}`,
@@ -411,6 +396,7 @@ const App: React.FC = () => {
                       clientName: `${updatedClient.firstName} ${updatedClient.lastName}`,
                       carrier: latestPolicy.carrier,
                       product: latestPolicy.productName || 'Pending',
+                      policyType: latestPolicy.type, // Explicitly saved here!
                       policyNumber: latestPolicy.policyNumber,
                       submittedDate: latestPolicy.submittedDate || getLocalToday(), 
                       policyStartDate: latestPolicy.startDate, 
@@ -419,9 +405,12 @@ const App: React.FC = () => {
                       status: appStatus,
                       notes: 'Auto-created from Pipeline Policy Capture.'
                   };
-                  
                   newApps.push(newApp);
                   updatedClient.policies[0].applicationId = newApp.id;
+
+                  if (latestPolicy.status === PolicyStatus.ACTIVE) {
+                      processPolicyOverrides(latestPolicy, updatedClient.agentId, teamMembers);
+                  }
               }
           }
 
@@ -429,12 +418,21 @@ const App: React.FC = () => {
               if (policy.applicationId) {
                   const existingApp = applications.find(a => a.id === policy.applicationId);
                   if (existingApp) {
+                      const appStatusMapping: Application['status'] = 
+                        policy.status === PolicyStatus.ACTIVE ? 'Issued' : 
+                        policy.status === PolicyStatus.APPROVED ? 'Approved' : 
+                        policy.status === PolicyStatus.CANCELLED ? 'Declined' : 
+                        existingApp.status;
+
                       const hasChanged = 
                           existingApp.policyStartDate !== policy.startDate ||
                           existingApp.premium !== policy.premium ||
                           existingApp.carrier !== policy.carrier ||
+                          existingApp.product !== (policy.productName || existingApp.product) ||
+                          existingApp.policyType !== policy.type ||
                           existingApp.policyNumber !== policy.policyNumber ||
-                          existingApp.submittedDate !== policy.submittedDate;
+                          existingApp.submittedDate !== policy.submittedDate ||
+                          existingApp.status !== appStatusMapping;
 
                       if (hasChanged) {
                            appsToUpdate.push({
@@ -443,9 +441,16 @@ const App: React.FC = () => {
                                premium: policy.premium,
                                carrier: policy.carrier,
                                product: policy.productName || existingApp.product, 
+                               policyType: policy.type,
                                policyNumber: policy.policyNumber,
-                               submittedDate: policy.submittedDate || existingApp.submittedDate
+                               submittedDate: policy.submittedDate || existingApp.submittedDate,
+                               status: appStatusMapping
                            });
+                      }
+
+                      // Check if newly marked issued
+                      if (existingApp.status !== 'Issued' && appStatusMapping === 'Issued') {
+                          processPolicyOverrides(policy, updatedClient.agentId, teamMembers);
                       }
                   }
               }
@@ -462,18 +467,14 @@ const App: React.FC = () => {
               return [...newApps, ...next];
           });
       }
-
       setClients(updatedClients);
   };
 
   const handleLogin = (user: User) => {
       setCurrentUser(user);
       const managementRoles: Role[] = ['MANAGER', 'AGENCY_OWNER', 'ADMIN'];
-      if (user.role === 'ADMIN') {
-        setActiveView('PLATFORM_ADMIN');
-      } else {
-        setActiveView(managementRoles.includes(user.role) ? 'MANAGER_DASHBOARD' : 'DASHBOARD');
-      }
+      if (user.role === 'ADMIN') setActiveView('PLATFORM_ADMIN');
+      else setActiveView(managementRoles.includes(user.role) ? 'MANAGER_DASHBOARD' : 'DASHBOARD');
   };
 
   const handleLogout = () => {
@@ -483,10 +484,7 @@ const App: React.FC = () => {
       localStorage.removeItem('arise_active_session_v1');
   };
 
-  const handleClientSelect = (client: Client | null) => {
-    setSelectedClient(client);
-  };
-
+  const handleClientSelect = (client: Client | null) => setSelectedClient(client);
   const handleViewClientDetails = (client: Client) => {
       setSelectedClient(client);
       setActiveView('CLIENTS');
@@ -494,15 +492,12 @@ const App: React.FC = () => {
 
   const handleSaveProfile = (updatedProfile: UserProfile) => {
       if (!currentUser) return;
-
       const updatedUser = { ...currentUser, ...updatedProfile };
       setCurrentUser(updatedUser);
-
       try {
           const savedUsers = JSON.parse(localStorage.getItem('arise_users_overrides') || '{}');
           savedUsers[updatedUser.email.toLowerCase()] = updatedUser;
           localStorage.setItem('arise_users_overrides', JSON.stringify(savedUsers));
-          
           localStorage.setItem('arise_active_session_v1', JSON.stringify(updatedUser));
       } catch (e) {
           console.error("Failed to save user profile to storage", e);
@@ -512,9 +507,7 @@ const App: React.FC = () => {
 
   const getCopilotContext = (): string => {
     let context = `User: ${currentUser?.name} (${currentUser?.role})\nCurrent View: ${activeView}`;
-    if (selectedClient) {
-        context += `\n\n--- SELECTED CLIENT DATA ---\n${JSON.stringify(selectedClient, null, 2)}`;
-    }
+    if (selectedClient) context += `\n\n--- SELECTED CLIENT DATA ---\n${JSON.stringify(selectedClient, null, 2)}`;
     return context;
   };
 
@@ -524,30 +517,19 @@ const App: React.FC = () => {
     setIsSidebarOpen(false);
   };
 
-  if (!currentUser) {
-      return <Login onLogin={handleLogin} />;
-  }
+  if (!currentUser) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="flex min-h-screen w-full bg-transparent font-sans text-slate-200 selection:bg-indigo-500 selection:text-white">
-      
-      {/* Mobile Backdrop */}
-      {isSidebarOpen && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-20 lg:hidden" onClick={() => setIsSidebarOpen(false)} />
-      )}
-
-      {/* Sidebar - Glass Effect */}
+      {isSidebarOpen && <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-20 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
       <aside className={`fixed lg:sticky top-0 h-screen z-30 w-64 bg-slate-900/70 backdrop-blur-xl border-r border-white/5 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col shrink-0 shadow-2xl lg:shadow-none`}>
         <div className="p-5 flex items-center space-x-3 border-b border-white/5 h-16 shrink-0 bg-white/5">
-          <div className="flex-shrink-0">
-            <AriseLogo className="w-8 h-8 shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
-          </div>
+          <div className="flex-shrink-0"><AriseLogo className="w-8 h-8 shadow-[0_0_10px_rgba(99,102,241,0.5)]" /></div>
           <div>
               <h1 className="text-xl font-bold text-white leading-none tracking-tight">ARISE</h1>
               <p className="text-[10px] text-indigo-400 font-bold tracking-widest mt-0.5 uppercase">Command Center</p>
           </div>
         </div>
-
         <nav className="flex-1 px-3 py-6 overflow-y-auto custom-scrollbar">
           {isSuperAdmin && (
              <NavSection title="Super Admin">
@@ -555,7 +537,6 @@ const App: React.FC = () => {
                 <NavItem view="SECURITY_AUDIT" icon={<ShieldCheck size={18} />} label="Security Ledger" activeView={activeView} onClick={handleNavClick} special={true} />
              </NavSection>
           )}
-
           <NavSection title="Workspace">
              <NavItem view="DASHBOARD" icon={<LayoutDashboard size={18} />} label="My Dashboard" activeView={activeView} onClick={handleNavClick} />
              <NavItem view="ACTIVITY_FEED" icon={<Activity size={18} />} label="Activity Log" activeView={activeView} onClick={handleNavClick} />
@@ -563,7 +544,6 @@ const App: React.FC = () => {
              <NavItem view="TASKS" icon={<CheckSquare size={18} />} label="Tasks" activeView={activeView} onClick={handleNavClick} />
              {canViewManagement && <NavItem view="MANAGER_DASHBOARD" icon={<LayoutDashboard size={18} />} label="Manager Hub" activeView={activeView} onClick={handleNavClick} />}
           </NavSection>
-
           <NavSection title="Sales & Service">
              <NavItem view="QUOTER" icon={<Calculator size={18} />} label="ARISE Smart Quoter" activeView={activeView} onClick={handleNavClick} />
              <NavItem view="LEAD_STORE" icon={<ShoppingCart size={18} />} label="ARISE Leads" activeView={activeView} onClick={handleNavClick} />
@@ -576,7 +556,6 @@ const App: React.FC = () => {
              <NavItem view="TRAINING" icon={<GraduationCap size={18} />} label="ARISE University" activeView={activeView} onClick={handleNavClick} />
              <NavItem view="REFERRALS" icon={<Gift size={18} />} label="Referrals" activeView={activeView} onClick={handleNavClick} />
           </NavSection>
-
           <NavSection title="Performance">
              <NavItem view="FINANCIAL" icon={<DollarSign size={18} />} label="Financials" activeView={activeView} onClick={handleNavClick} />
              <NavItem view="ANALYTICS" icon={<PieChart size={18} />} label="Analytics" activeView={activeView} onClick={handleNavClick} />
@@ -584,7 +563,6 @@ const App: React.FC = () => {
              <NavItem view="LEADERBOARD" icon={<BarChart3 size={18} />} label="Leaderboard" activeView={activeView} onClick={handleNavClick} />
              <NavItem view="PERSISTENCY" icon={<TrendingUp size={18} />} label="Persistency Tracker" activeView={activeView} onClick={handleNavClick} />
           </NavSection>
-
           <NavSection title="Agency Management">
              <div className="mb-1">
                 <button
@@ -605,7 +583,6 @@ const App: React.FC = () => {
                   </div>
                 )}
              </div>
-
              <NavItem view="TEAMS" icon={<Network size={18} />} label="My Team" activeView={activeView} onClick={handleNavClick} />
              {canViewManagement && <NavItem view="RECRUITS" icon={<UserPlus size={18} />} label="Recruiting" activeView={activeView} onClick={handleNavClick} />}
              {canViewManagement && <NavItem view="OVERRIDES" icon={<Percent size={18} />} label="Overrides" activeView={activeView} onClick={handleNavClick} />}
@@ -613,76 +590,27 @@ const App: React.FC = () => {
              <NavItem view="SETTINGS" icon={<Settings size={18} />} label="Settings" activeView={activeView} onClick={handleNavClick} />
           </NavSection>
         </nav>
-
         <div className="p-4 border-t border-white/5 bg-white/5">
-           <button 
-             onClick={() => setIsCopilotOpen(true)}
-             className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-indigo-600 text-white shadow-lg hover:shadow-indigo-500/30 hover:bg-indigo-500 transition-all group relative overflow-hidden mb-3"
-           >
+           <button onClick={() => setIsCopilotOpen(true)} className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-indigo-600 text-white shadow-lg hover:shadow-indigo-500/30 hover:bg-indigo-500 transition-all group relative overflow-hidden mb-3">
              <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-indigo-700 opacity-0 group-hover:opacity-100 transition-opacity"></div>
              <Sparkles size={16} className="text-white relative z-10 animate-pulse" />
              <span className="font-bold text-sm relative z-10">Ask ARISE AI</span>
            </button>
-           <p className="text-[10px] font-bold text-white text-center uppercase tracking-widest">
-             Powered By ARISE Financial Systems™
-           </p>
+           <p className="text-[10px] font-bold text-white text-center uppercase tracking-widest">Powered By ARISE Financial Systems™</p>
         </div>
       </aside>
-
       <main className="flex-1 flex flex-col min-h-screen w-full relative bg-transparent">
-        
-        <Header 
-            user={currentUser} 
-            activeView={activeView}
-            onLogout={handleLogout}
-            onToggleSidebar={() => setIsSidebarOpen(true)}
-            onNavigate={handleNavClick}
-        />
-
+        <Header user={currentUser} activeView={activeView} onLogout={handleLogout} onToggleSidebar={() => setIsSidebarOpen(true)} onNavigate={handleNavClick} />
         <div className="flex-1 p-4 lg:p-8 relative custom-scrollbar overflow-y-auto">
            <div className="w-full max-w-[1920px] mx-auto flex flex-col min-h-full">
-              {activeView === 'DASHBOARD' && <Dashboard user={currentUser || undefined} onNavigate={handleNavClick} clients={visibleClients} />}
-              {activeView === 'MANAGER_DASHBOARD' && <ManagerDashboard userProfile={userProfile} onNavigate={handleNavClick} />}
+              {activeView === 'DASHBOARD' && <Dashboard user={currentUser || undefined} onNavigate={handleNavClick} clients={visibleClients} teamMembers={teamMembers} />}
+              {activeView === 'MANAGER_DASHBOARD' && <ManagerDashboard userProfile={userProfile} onNavigate={handleNavClick} clients={visibleClients} applications={applications} recruits={recruits} />}
               {activeView === 'PLATFORM_ADMIN' && <PlatformAdmin currentUser={currentUser} />}
               {activeView === 'SECURITY_AUDIT' && <SecurityAudit />}
-              
-              {activeView === 'CLIENTS' && (
-                <Clients 
-                  clients={visibleClients} 
-                  currentUser={currentUser}
-                  onUpdateClients={handleClientUpdate}
-                  onSelectClient={handleClientSelect} 
-                  selectedClient={selectedClient} 
-                />
-              )}
-              
-              {activeView === 'PIPELINE' && (
-                <Pipeline 
-                  clients={visibleClients}
-                  currentUserId={currentUser.id}
-                  onUpdateClients={handleClientUpdate}
-                />
-              )}
-
-              {activeView === 'APPLICATIONS' && (
-                <Applications 
-                  applications={applications} 
-                  clients={visibleClients}
-                  onUpdateApplication={handleUpdateApplication}
-                  onAddApplication={handleAddApplication}
-                  onDeleteApplication={handleDeleteApplication}
-                />
-              )}
-
-              {activeView === 'BOOK_OF_BUSINESS' && (
-                  <BookOfBusiness 
-                    clients={visibleClients}
-                    onUpdateClients={handleClientUpdate}
-                    onViewClient={handleViewClientDetails}
-                  />
-              )}
-
-              {activeView === 'THE_DOJO' && <TheDojo />}
+              {activeView === 'CLIENTS' && <Clients clients={visibleClients} currentUserId={currentUser.id} onUpdateClients={handleClientUpdate} onSelectClient={handleClientSelect} selectedClient={selectedClient} />}
+              {activeView === 'PIPELINE' && <Pipeline clients={visibleClients} currentUserId={currentUser.id} onUpdateClients={handleClientUpdate} />}
+              {activeView === 'APPLICATIONS' && <Applications applications={applications} clients={visibleClients} onUpdateApplication={handleUpdateApplication} onAddApplication={handleAddApplication} onDeleteApplication={handleDeleteApplication} />}
+              {activeView === 'BOOK_OF_BUSINESS' && <BookOfBusiness clients={visibleClients} onUpdateClients={handleClientUpdate} onViewClient={handleViewClientDetails} />}
               {activeView === 'QUOTER' && <Quoter />}
               {activeView === 'LEAD_STORE' && <LeadStore />}
               {activeView === 'CARRIERS' && <Carriers />}
@@ -690,44 +618,24 @@ const App: React.FC = () => {
               {activeView === 'FINANCIAL' && <Financial clients={visibleClients} />}
               {activeView === 'TASKS' && <Tasks />}
               {activeView === 'CALENDAR' && <Calendar currentUser={currentUser || undefined} />}
-              {activeView === 'GOALS' && <Goals />}
+              {activeView === 'GOALS' && <Goals clients={visibleClients} applications={applications} />}
               {activeView === 'COMPLIANCE' && <Compliance />}
               {activeView === 'TRAINING' && <Training onNavigate={handleNavClick} />}
               {activeView === 'PERSISTENCY' && <Persistency clients={visibleClients} />}
               {activeView === 'ACTIVITY_FEED' && <ActivityFeed />}
               {activeView === 'REFERRALS' && <Referrals />}
-              {activeView === 'ANALYTICS' && <Analytics clients={visibleClients} />}
-              
-              {activeView === 'SETTINGS' && (
-                <SettingsView 
-                  userProfile={userProfile} 
-                  onSaveProfile={handleSaveProfile} 
-                />
-              )}
-              
-              {activeView === 'TEAMS' && <Teams userProfile={userProfile} currentUser={currentUser} />}
-              {activeView === 'RECRUITS' && <Recruits />}
-              {activeView === 'LEADERBOARD' && <Leaderboard />}
+              {activeView === 'ANALYTICS' && <Analytics clients={visibleClients} onNavigate={handleNavClick} />}
+              {activeView === 'SETTINGS' && <SettingsView userProfile={userProfile} onSaveProfile={handleSaveProfile} />}
+              {activeView === 'TEAMS' && <Teams userProfile={userProfile} currentUser={currentUser} teamMembers={teamMembers} onUpdateTeam={setTeamMembers} />}
+              {activeView === 'RECRUITS' && <Recruits recruits={recruits} onUpdateRecruits={setRecruits} />}
+              {activeView === 'LEADERBOARD' && <Leaderboard clients={visibleClients} teamMembers={teamMembers} />}
               {activeView === 'OVERRIDES' && <ManagerOverrides />}
               {activeView === 'ROLES' && <RoleManagement currentUser={currentUser} />}
            </div>
         </div>
-
-        {!isCopilotOpen && (
-             <button 
-                onClick={() => setIsCopilotOpen(true)}
-                className="fixed bottom-6 right-6 lg:hidden w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center shadow-2xl z-40 text-white animate-bounce"
-             >
-                <Sparkles size={24} />
-             </button>
-        )}
+        {!isCopilotOpen && <button onClick={() => setIsCopilotOpen(true)} className="fixed bottom-6 right-6 lg:hidden w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center shadow-2xl z-40 text-white animate-bounce"><Sparkles size={24} /></button>}
       </main>
-
-      <Copilot 
-        isOpen={isCopilotOpen} 
-        onClose={() => setIsCopilotOpen(false)} 
-        contextData={getCopilotContext()}
-      />
+      <Copilot isOpen={isCopilotOpen} onClose={() => setIsCopilotOpen(false)} contextData={getCopilotContext()} />
     </div>
   );
 };

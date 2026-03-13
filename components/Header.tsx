@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Bell, Menu, LogOut, Settings, User, ChevronDown, CheckCircle2, AlertCircle, Info, Search, X, Trash2 } from 'lucide-react';
 import { User as UserType, ViewState } from '../types';
@@ -58,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({ user, activeView, onLogout, onTo
             case 'DASHBOARD': return 'My Dashboard';
             case 'MANAGER_DASHBOARD': return 'Manager Hub';
             case 'PLATFORM_ADMIN': return 'Platform Admin';
+            case 'GOALS': return 'Strategic Horizon';
             default: 
                 return view.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
         }

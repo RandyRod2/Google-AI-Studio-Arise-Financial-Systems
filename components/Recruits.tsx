@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Recruit, TeamMember, SaaSUser, User } from '../types';
 import { logAuditAction } from '../services/auditService';
@@ -6,23 +5,19 @@ import {
     UserPlus, Plus, X, Edit2, GripVertical, Users, Clock, UserCheck, 
     Search, Send, CheckCircle2, Calculator, TrendingUp, DollarSign, 
     Building2, ArrowRight, Target, Sliders, Zap, Mail, ShieldCheck,
-    Copy, ExternalLink, Sparkles, UserMinus, ShieldAlert
+    Copy, ExternalLink, Sparkles, UserMinus, ShieldAlert, ChevronDown, TrendingDown, Wallet, ArrowUpRight
 } from 'lucide-react';
 import { MOCK_TEAM, generateSaaSUsers } from '../services/mockData';
 import { getAvailableCarriers, getAvailableProducts, calculateCommissionExact } from '../services/commissionService';
 
-const Recruits: React.FC = () => {
+interface RecruitsProps {
+    recruits: Recruit[];
+    onUpdateRecruits: (recruits: Recruit[]) => void;
+}
+
+const Recruits: React.FC<RecruitsProps> = ({ recruits, onUpdateRecruits }) => {
     // --- State Management ---
     const [activeTab, setActiveTab] = useState<'PIPELINE' | 'ALPHA'>('PIPELINE');
-    const [recruits, setRecruits] = useState<Recruit[]>(() => {
-        try {
-            const saved = localStorage.getItem('arise_recruits');
-            return saved ? JSON.parse(saved) : [
-                { id: 'r1', name: 'David Wallace', source: 'LinkedIn', stage: 'Interview', dateAdded: '2024-10-01', notes: 'Strong sales background.', email: 'david.wallace@example.com' },
-                { id: 'r2', name: 'Karen Filippelli', source: 'Referral', stage: 'Licensing', dateAdded: '2024-09-25', notes: 'Scheduled for exam.', email: 'karen.f@example.com' },
-            ];
-        } catch (e) { return []; }
-    });
 
     const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => {
         try {
@@ -33,15 +28,37 @@ const Recruits: React.FC = () => {
 
     // --- Recruiting Alpha State ---
     const [alphaInputs, setAlphaInputs] = useState({
-        carrier: 'Mutual of Omaha',
-        product: 'Living Promise Whole Life',
+        carrier: '',
+        product: '',
         currentLevel: 80,
         ariseLevel: 115,
         monthlyPremium: 4500
     });
 
+    const [alphaCarriers, setAlphaCarriers] = useState<string[]>([]);
+    const [alphaProducts, setAlphaProducts] = useState<string[]>([]);
+
+    // Fetch Carriers on Mount
+    useEffect(() => {
+        const carriers = getAvailableCarriers();
+        setAlphaCarriers(carriers);
+        if (carriers.length > 0) {
+            setAlphaInputs(prev => ({ ...prev, carrier: carriers[0] }));
+        }
+    }, []);
+
+    // Fetch Products when Carrier Changes
+    useEffect(() => {
+        if (alphaInputs.carrier) {
+            const products = getAvailableProducts(alphaInputs.carrier);
+            setAlphaProducts(products);
+            if (products.length > 0) {
+                setAlphaInputs(prev => ({ ...prev, product: products[0] }));
+            }
+        }
+    }, [alphaInputs.carrier]);
+
     // Persistence
-    useEffect(() => { localStorage.setItem('arise_recruits', JSON.stringify(recruits)); }, [recruits]);
     useEffect(() => { localStorage.setItem('arise_team_members', JSON.stringify(teamMembers)); }, [teamMembers]);
 
     // UI States
@@ -68,11 +85,36 @@ const Recruits: React.FC = () => {
     // --- Alpha Calculations ---
     const alphaResults = useMemo(() => {
         const annualPremium = alphaInputs.monthlyPremium * 12;
-        const currentAnnual = calculateCommissionExact(alphaInputs.carrier, alphaInputs.product, annualPremium, alphaInputs.currentLevel);
-        const ariseAnnual = calculateCommissionExact(alphaInputs.carrier, alphaInputs.product, annualPremium, alphaInputs.ariseLevel);
-        const delta = ariseAnnual.total - currentAnnual.total;
-        const deltaPercent = currentAnnual.total > 0 ? ((ariseAnnual.total / currentAnnual.total) - 1) * 100 : 0;
-        return { delta, deltaPercent, currentAnnual: currentAnnual.total, ariseAnnual: ariseAnnual.total, currentAdvance: currentAnnual.total * 0.75, ariseAdvance: ariseAnnual.total * 0.75 };
+        
+        // Use exact registry calculations including interpolation
+        const currentData = calculateCommissionExact(
+            alphaInputs.carrier, 
+            alphaInputs.product, 
+            annualPremium, 
+            alphaInputs.currentLevel
+        );
+        
+        const ariseData = calculateCommissionExact(
+            alphaInputs.carrier, 
+            alphaInputs.product, 
+            annualPremium, 
+            alphaInputs.ariseLevel
+        );
+
+        const delta = ariseData.total - currentData.total;
+        const deltaPercent = currentData.total > 0 ? ((ariseData.total / currentData.total) - 1) * 100 : 0;
+        
+        return { 
+            delta, 
+            deltaPercent, 
+            currentAnnual: currentData.total, 
+            ariseAnnual: ariseData.total, 
+            currentAdvance: currentData.total * 0.75, 
+            ariseAdvance: ariseData.total * 0.75,
+            annualPremium,
+            currentRate: currentData.fycRate,
+            ariseRate: ariseData.fycRate
+        };
     }, [alphaInputs]);
 
     // --- Actions ---
@@ -88,21 +130,18 @@ const Recruits: React.FC = () => {
             dateAdded: new Date().toISOString().split('T')[0],
             notes: newRecruit.notes || ''
         };
-        setRecruits([...recruits, recruit]);
+        onUpdateRecruits([...recruits, recruit]);
         setIsAddModalOpen(false);
         setNewRecruit({ name: '', source: 'LinkedIn', stage: 'New', email: '', phone: '' });
     };
 
-    // --- Defined handleUpdateRecruit to handle saving changes to a recruit ---
     const handleUpdateRecruit = () => {
         if (!editingRecruit || !editingRecruit.name) return;
-        
-        setRecruits(prev => prev.map(r => r.id === editingRecruit.id ? editingRecruit : r));
+        onUpdateRecruits(recruits.map(r => r.id === editingRecruit.id ? editingRecruit : r));
         setIsEditModalOpen(false);
         setEditingRecruit(null);
     };
 
-    // Promotion Data Logic
     const handleMoveToRoster = (recruit: Recruit) => {
         const newAgent: TeamMember = {
             id: `agent-${Date.now()}`,
@@ -110,13 +149,13 @@ const Recruits: React.FC = () => {
             email: recruit.email || '',
             role: 'AGENT',
             production: 0,
-            activePolicies: 1, // Start with 1 dummy policy to show active
+            activePolicies: 1, 
             avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(recruit.name)}&background=random`,
             defaultCompLevel: 90
         };
 
         setTeamMembers(prev => [...prev, newAgent]);
-        setRecruits(prev => prev.filter(r => r.id !== recruit.id));
+        onUpdateRecruits(recruits.filter(r => r.id !== recruit.id));
         setConfirmingPromoteId(null);
         
         const actorRaw = localStorage.getItem('arise_active_session_v1');
@@ -124,9 +163,7 @@ const Recruits: React.FC = () => {
         logAuditAction(actor, 'AGENT_PROMOTED', recruit.id, `Promoted ${recruit.name} to Agent Roster. Data move completed.`, 2);
     };
 
-    // Invite & Promotion Logic
     const handleSendInviteAndPromote = (recruit: Recruit) => {
-        // 1. Check if they already exist as a SaaS user
         const saasUsersRaw = localStorage.getItem('arise_saas_users');
         let saasUsers: SaaSUser[] = saasUsersRaw ? JSON.parse(saasUsersRaw) : generateSaaSUsers(10);
         const existingUser = saasUsers.find(u => u.email.toLowerCase() === recruit.email?.toLowerCase());
@@ -135,7 +172,6 @@ const Recruits: React.FC = () => {
         const inviteLink = `https://arise-command.app/onboard?invite=${inviteCode}&email=${encodeURIComponent(recruit.email || '')}`;
 
         if (!existingUser && recruit.email) {
-            // Create a pending user in the SaaS registry
             const pendingSaaSUser: SaaSUser = {
                 id: `user-${Date.now()}`,
                 name: recruit.name,
@@ -153,19 +189,15 @@ const Recruits: React.FC = () => {
             localStorage.setItem('arise_saas_users', JSON.stringify(saasUsers));
         }
 
-        // 2. Perform data promotion
         handleMoveToRoster(recruit);
 
-        // 3. Log to Audit Vault
         const actorRaw = localStorage.getItem('arise_active_session_v1');
         const actor: User | null = actorRaw ? JSON.parse(actorRaw) : null;
         logAuditAction(actor, 'AGENT_INVITE_SENT', recruit.id, `Platform invitation link generated for ${recruit.name}. Link displayed to administrator.`, 4);
 
-        // 4. Trigger Success Modal
         setPromotionSuccess({ recruit, inviteLink });
     };
 
-    // Drag and Drop Handlers
     const handleDragStart = (e: React.DragEvent, recruitId: string) => {
         setDraggedRecruitId(recruitId);
         e.dataTransfer.setData('recruitId', recruitId);
@@ -190,7 +222,7 @@ const Recruits: React.FC = () => {
         const recruitId = e.dataTransfer.getData('recruitId');
         
         if (recruitId) {
-            setRecruits(prev => prev.map(r => 
+            onUpdateRecruits(recruits.map(r => 
                 r.id === recruitId ? { ...r, stage } : r
             ));
         }
@@ -198,7 +230,6 @@ const Recruits: React.FC = () => {
         handleDragEnd();
     };
 
-    // Auto-scroll Logic
     const handleContainerDragOver = (e: React.DragEvent) => {
         e.preventDefault(); 
         if (!draggedRecruitId || !scrollContainerRef.current) return;
@@ -272,7 +303,7 @@ const Recruits: React.FC = () => {
                                         <div className={`p-3 rounded-t-xl border-b flex justify-between items-center font-bold text-sm uppercase tracking-wide ${getStageColor(stage)}`}>{stage === 'Contracted' ? 'Ready for Deployment' : stage} <span className="bg-slate-900/50 px-2 py-0.5 rounded-full text-xs text-slate-300 border border-white/5">{items.length}</span></div>
                                         <div className="p-3 flex-1 overflow-y-auto space-y-3 custom-scrollbar">
                                             {items.map((recruit) => (
-                                                <div key={recruit.id} draggable onDragStart={(e) => handleDragStart(e, recruit.id)} onDragEnd={handleDragEnd} onClick={() => { setEditingRecruit(recruit); setIsEditModalOpen(true); }} className={`bg-slate-800/80 p-4 rounded-lg shadow-sm border border-white/10 hover:border-indigo-500/50 hover:shadow-md transition-all cursor-pointer group ${draggedRecruitId === recruit.id ? 'opacity-50' : ''}`}>
+                                                <div key={recruit.id} draggable onDragStart={(e) => handleDragStart(e, recruit.id)} onDragEnd={handleDragEnd} onClick={(e) => { e.stopPropagation(); setEditingRecruit(recruit); setIsEditModalOpen(true); }} className={`bg-slate-800/80 p-4 rounded-lg shadow-sm border border-white/10 hover:border-indigo-500/50 hover:shadow-md transition-all cursor-pointer group ${draggedRecruitId === recruit.id ? 'opacity-50' : ''}`}>
                                                     <div className="flex justify-between items-start mb-2"><h4 className="font-bold text-white text-sm flex items-center gap-2"><GripVertical size={12} className="text-slate-500 opacity-0 group-hover:opacity-100" /> {recruit.name}</h4><Edit2 size={12} className="text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" /></div>
                                                     <div className="space-y-1.5"><div className="flex items-center gap-2 text-xs text-slate-400"><Users size={12} /> {recruit.source}</div><div className="flex items-center gap-2 text-xs text-slate-400"><Mail size={12} /> {recruit.email || 'No Email'}</div></div>
                                                     
@@ -323,15 +354,215 @@ const Recruits: React.FC = () => {
                 </div>
             ) : (
                 <div className="flex-1 flex flex-col lg:flex-row gap-8 animate-fade-in pb-12 overflow-y-auto custom-scrollbar px-4">
-                     {/* Earnings Alpha Calculator UI logic would go here, preserved from previous builds */}
+                    {/* LEFT: INPUTS */}
+                    <div className="w-full lg:w-[400px] shrink-0 space-y-6">
+                        <div className="bg-slate-900 rounded-2xl border border-white/5 p-6 shadow-xl relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity">
+                                <Calculator size={100} />
+                            </div>
+                            
+                            <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-6 flex items-center gap-2">
+                                <Sliders size={18} className="text-indigo-400" /> Comparison Parameters
+                            </h3>
+
+                            <div className="space-y-5">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Carrier Selection</label>
+                                    <div className="relative">
+                                        <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                                        <select 
+                                            className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 pl-10 text-sm text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none"
+                                            value={alphaInputs.carrier}
+                                            onChange={e => setAlphaInputs({...alphaInputs, carrier: e.target.value})}
+                                        >
+                                            {alphaCarriers.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={16} />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Target Product</label>
+                                    <div className="relative">
+                                        <Zap className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                                        <select 
+                                            className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 pl-10 text-sm text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none"
+                                            value={alphaInputs.product}
+                                            onChange={e => setAlphaInputs({...alphaInputs, product: e.target.value})}
+                                        >
+                                            {alphaProducts.map(p => <option key={p} value={p}>{p}</option>)}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={16} />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Monthly Premium Target</label>
+                                    <div className="relative">
+                                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                                        <input 
+                                            type="number"
+                                            className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 pl-10 text-sm text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            value={alphaInputs.monthlyPremium}
+                                            onChange={e => setAlphaInputs({...alphaInputs, monthlyPremium: Number(e.target.value)})}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 border-t border-white/5">
+                                    <div className="flex justify-between items-center mb-3">
+                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Contract</span>
+                                        <span className="text-sm font-black text-slate-300">{alphaInputs.currentLevel}%</span>
+                                    </div>
+                                    <input 
+                                        type="range" min="70" max="145" step="5"
+                                        className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-slate-500"
+                                        value={alphaInputs.currentLevel}
+                                        onChange={e => setAlphaInputs({...alphaInputs, currentLevel: Number(e.target.value)})}
+                                    />
+                                </div>
+
+                                <div className="pt-2">
+                                    <div className="flex justify-between items-center mb-3">
+                                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Arise Platform Level</span>
+                                        <span className="text-sm font-black text-indigo-400">{alphaInputs.ariseLevel}%</span>
+                                    </div>
+                                    <input 
+                                        type="range" min="70" max="145" step="5"
+                                        className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]"
+                                        value={alphaInputs.ariseLevel}
+                                        onChange={e => setAlphaInputs({...alphaInputs, ariseLevel: Number(e.target.value)})}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-indigo-900/20 border border-indigo-500/20 rounded-2xl p-5 flex gap-4 items-center">
+                            <Sparkles className="text-indigo-400 shrink-0" size={24} />
+                            <p className="text-[10px] font-bold text-indigo-200 leading-relaxed uppercase tracking-wider">Use this data to demonstrate the immediate financial impact of moving their book to the Arise ecosystem.</p>
+                        </div>
+                    </div>
+
+                    {/* RIGHT: RESULTS */}
+                    <div className="flex-1 space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Comparison Cards */}
+                            <div className="bg-slate-900 rounded-2xl border border-white/5 p-6 flex flex-col justify-between overflow-hidden relative">
+                                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                                    <TrendingDown size={100} />
+                                </div>
+                                <div className="relative z-10">
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">Current Earnings</p>
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-4xl font-black text-white">${alphaResults.currentAnnual.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                                        <span className="text-xs font-bold text-slate-500">/ YEAR</span>
+                                    </div>
+                                    <p className="text-[9px] font-bold text-slate-500 uppercase mt-4">Calculated at {alphaInputs.currentLevel}% Contract Level</p>
+                                </div>
+                            </div>
+
+                            <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 rounded-2xl border border-indigo-500/30 p-6 flex flex-col justify-between overflow-hidden relative shadow-2xl shadow-indigo-900/20">
+                                <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                                    <TrendingUp size={100} className="text-white" />
+                                </div>
+                                <div className="relative z-10">
+                                    <p className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.2em] mb-4">Arise Platform Earnings</p>
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-4xl font-black text-white">${alphaResults.ariseAnnual.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                                        <span className="text-xs font-bold text-indigo-300">/ YEAR</span>
+                                    </div>
+                                    <p className="text-[9px] font-bold text-indigo-400 uppercase mt-4">Calculated at {alphaInputs.ariseLevel}% Platform Base</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Delta Analytics */}
+                        <div className="bg-slate-900 rounded-3xl border border-white/10 p-8 shadow-2xl relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-emerald-500 to-indigo-500"></div>
+                            
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
+                                <div>
+                                    <h4 className="text-sm font-black text-slate-500 uppercase tracking-[0.3em] mb-2">Annual Revenue Lift (Alpha)</h4>
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-6xl font-black text-white tracking-tighter">+${alphaResults.delta.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                                        <div className="px-3 py-1 bg-emerald-500 text-white rounded-lg text-sm font-black shadow-lg shadow-emerald-900/40">
+                                            +{alphaResults.deltaPercent.toFixed(1)}% LIFT
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Annual Premium Target</p>
+                                    <p className="text-xl font-black text-white">${alphaResults.annualPremium.toLocaleString()}</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 flex items-center gap-5">
+                                    <div className="w-14 h-14 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center shrink-0 border border-indigo-500/20">
+                                        <Wallet size={28} />
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Immediate Advance Delta</p>
+                                        <h5 className="text-2xl font-black text-indigo-400">+${(alphaResults.delta * 0.75).toLocaleString(undefined, {maximumFractionDigits: 0})}</h5>
+                                        <p className="text-[9px] text-slate-600 font-bold uppercase mt-1">Extra cash-in-hand per year</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 flex items-center gap-5">
+                                    <div className="w-14 h-14 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center shrink-0 border border-emerald-500/20">
+                                        <Target size={28} />
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Monthly Cashflow Increase</p>
+                                        <h5 className="text-2xl font-black text-emerald-400">+${(alphaResults.delta / 12).toLocaleString(undefined, {maximumFractionDigits: 0})}</h5>
+                                        <p className="text-[9px] text-slate-600 font-bold uppercase mt-1">Sustained monthly lift</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-10 flex flex-col items-center">
+                                <div className="w-full flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">
+                                    <span>Earnings Breakdown Visualization</span>
+                                    <span className="text-indigo-400">Arise Dominance: +{alphaResults.deltaPercent.toFixed(0)}%</span>
+                                </div>
+                                <div className="w-full h-8 bg-slate-950 rounded-2xl border border-white/5 overflow-hidden flex relative group">
+                                    <div 
+                                        className="h-full bg-slate-700 transition-all duration-1000 ease-out flex items-center justify-center overflow-hidden" 
+                                        style={{ width: `${(alphaResults.currentAnnual / alphaResults.ariseAnnual) * 100}%` }}
+                                    >
+                                        <span className="text-[9px] font-black text-white/40 uppercase whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">Current</span>
+                                    </div>
+                                    <div 
+                                        className="h-full bg-indigo-600 transition-all duration-1000 ease-out delay-300 flex items-center justify-center relative overflow-hidden" 
+                                        style={{ width: `${(alphaResults.delta / alphaResults.ariseAnnual) * 100}%` }}
+                                    >
+                                        <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.1)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.1)_50%,rgba(255,255,255,0.1)_75%,transparent_75%,transparent)] bg-[length:20px_20px] animate-[scroll-ticker_20s_linear_infinite]"></div>
+                                        <span className="text-[9px] font-black text-white uppercase whitespace-nowrap relative z-10 drop-shadow-md">Arise Alpha</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Close Logic */}
+                        <div className="bg-slate-900/40 rounded-3xl p-8 border border-white/5 flex flex-col md:flex-row items-center gap-8 group">
+                            <div className="shrink-0 p-4 bg-indigo-500/10 rounded-[2rem] border border-indigo-500/20 group-hover:scale-110 transition-transform duration-500">
+                                <ArrowUpRight className="text-indigo-400" size={48} />
+                            </div>
+                            <div>
+                                <h5 className="text-lg font-black text-white uppercase tracking-tight mb-2">The Recruitment Bridge</h5>
+                                <p className="text-sm text-slate-400 leading-relaxed italic">
+                                    "Based on your current numbers with <b>{alphaInputs.carrier}</b>, you're leaving over <b>${alphaResults.delta.toLocaleString(undefined, {maximumFractionDigits: 0})}</b> a year on the table. At Arise, our 115% platform base ensures that the harder you work, the more of that production you actually keep. That's an immediate <b>${(alphaResults.delta * 0.75).toLocaleString(undefined, {maximumFractionDigits: 0})}</b> pay raise on your advances alone."
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 
-            {/* HIGH-FIDELITY INVITATION SUCCESS MODAL */}
+            {/* Inivation Success Modal and others remain same */}
             {promotionSuccess && (
                 <div className="fixed inset-0 flex items-center justify-center z-[150] p-4 bg-slate-950/95 backdrop-blur-2xl">
                     <div className="bg-slate-900 rounded-[3rem] border-4 border-indigo-500/30 shadow-[0_0_100px_rgba(99,102,241,0.2)] w-full max-w-xl overflow-hidden ring-1 ring-white/10 p-10 flex flex-col items-center text-center animate-in zoom-in-95 duration-500">
-                        {/* Animated Icon Header */}
                         <div className="relative mb-8">
                             <div className="w-24 h-24 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white shadow-2xl relative z-10 animate-bounce">
                                 <Sparkles size={48} />
@@ -393,7 +624,7 @@ const Recruits: React.FC = () => {
                 </div>
             )}
 
-            {/* Pipeline Modals (Add/Edit) */}
+            {/* Pipeline Modals */}
             {isAddModalOpen && (
                 <div className="fixed inset-0 flex items-center justify-center z-[110] p-4 bg-slate-950/80 backdrop-blur-md">
                     <div className="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 w-full max-w-md flex flex-col">

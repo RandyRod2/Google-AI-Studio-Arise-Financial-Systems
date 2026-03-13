@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Plus, X, AlertTriangle, CheckCircle2, XCircle, ChevronDown, ChevronUp, Calculator, Stethoscope, Pill, User, Ruler } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Search, Plus, X, AlertTriangle, CheckCircle2, XCircle, ChevronDown, ChevronUp, Calculator, Stethoscope, Pill, User, Ruler, FileDown, Mail, Download, Printer, Share2, Sparkles, Building2 } from 'lucide-react';
 import { getCommissionRegistry } from '../services/commissionService';
 
 // --- MOCK CARRIER DATA & RULES ---
@@ -96,6 +96,10 @@ const Quoter: React.FC = () => {
 
     const [conditionSearch, setConditionSearch] = useState('');
     const [isConditionDropdownOpen, setIsConditionDropdownOpen] = useState(false);
+    
+    // Proposal State
+    const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
+    const [selectedProposalPlan, setSelectedProposalPlan] = useState<any>(null);
 
     // --- ACTIONS ---
 
@@ -121,37 +125,35 @@ const Quoter: React.FC = () => {
         }));
     };
 
+    const openProposal = (plan: any) => {
+        setSelectedProposalPlan(plan);
+        setIsProposalModalOpen(true);
+    };
+
     // --- DYNAMIC CARRIER GENERATION ---
-    // Reads from the Commission Registry to populate the Quoter
     const carrierPlans = useMemo(() => {
         const registry = getCommissionRegistry();
         const plans: CarrierPlan[] = [];
 
-        // 1. Manually add Aetna/CVS (as requested) if not present or as override
         plans.push(
             { id: 'aetna_cvs', carrierName: 'Aetna / CVS', planName: 'Accendo', minAge: 40, maxAge: 89, baseRate: 3.1, policyFee: 40, type: 'LEVEL', logoColor: 'bg-red-600' },
             { id: 'aetna_mod', carrierName: 'Aetna / CVS', planName: 'Accendo Modified', minAge: 40, maxAge: 75, baseRate: 6.2, policyFee: 40, type: 'MODIFIED', logoColor: 'bg-red-600' }
         );
 
-        // 2. Generate plans from Registry
         Object.keys(registry).forEach((carrierName, index) => {
-            // Avoid duplication if Aetna is in registry (simple name check)
             if (carrierName.toLowerCase().includes('aetna')) return;
 
             const products = Object.keys(registry[carrierName]);
             if (products.length === 0) return;
 
-            // Simple heuristic to determine Plan Type based on Product Name
-            // In a real app, this metadata would be part of the product definition
             products.forEach((productName, prodIndex) => {
                 const pName = productName.toLowerCase();
                 let type: PlanType = 'LEVEL';
-                let baseRate = 3.2; // Default rate
+                let baseRate = 3.2; 
                 let minAge = 18;
                 let maxAge = 85;
                 let color = 'bg-slate-700';
 
-                // Type Heuristics
                 if (pName.includes('graded') || pName.includes('guaranteed') || pName.includes('gi') || pName.includes('express issue')) {
                     if (pName.includes('guaranteed') || pName.includes('gi')) {
                         type = 'GI';
@@ -166,25 +168,23 @@ const Quoter: React.FC = () => {
                     }
                 }
 
-                // Color Heuristics
                 if (carrierName.includes('Transamerica')) color = 'bg-red-500';
                 else if (carrierName.includes('Mutual')) color = 'bg-green-600';
                 else if (carrierName.includes('United Home')) color = 'bg-blue-500';
                 else if (carrierName.includes('Forest')) color = 'bg-blue-600';
-                else if (carrierName.includes('American')) color = 'bg-indigo-600';
+                else if (carrierName.includes('American Amicable')) color = 'bg-indigo-600';
                 else if (carrierName.includes('Baltimore')) color = 'bg-red-800';
                 else if (carrierName.includes('Legal')) color = 'bg-orange-500';
                 else if (carrierName.includes('John')) color = 'bg-slate-600';
                 else if (carrierName.includes('SBLI')) color = 'bg-blue-700';
 
-                // Add to list (Limit removed to show all products)
                 plans.push({
                     id: `gen_${index}_${prodIndex}`,
                     carrierName: carrierName,
                     planName: productName,
                     minAge,
                     maxAge,
-                    baseRate: baseRate + (Math.random() * 0.5), // Variance for realism
+                    baseRate: baseRate + (Math.random() * 0.5),
                     policyFee: 35,
                     type,
                     logoColor: color
@@ -196,9 +196,7 @@ const Quoter: React.FC = () => {
     }, []);
 
     // --- UNDERWRITING ENGINE ---
-
     const underwritingResults = useMemo(() => {
-        // Calculate BMI
         const heightInInches = (inputs.heightFt * 12) + inputs.heightIn;
         const bmi = heightInInches > 0 ? (inputs.weight * 703) / (heightInInches * heightInInches) : 0;
 
@@ -206,13 +204,11 @@ const Quoter: React.FC = () => {
             let status: 'APPROVED' | 'DECLINED' | 'REFER_TO_GRADED' = 'APPROVED';
             let reasons: string[] = [];
 
-            // 1. Basic Eligibility
             if (inputs.age < plan.minAge || inputs.age > plan.maxAge) {
                 status = 'DECLINED';
                 reasons.push(`Age ${inputs.age} outside limits (${plan.minAge}-${plan.maxAge})`);
             }
 
-            // 2. BMI Check
             if (bmi > 45 && plan.type !== 'GI') {
                 status = 'DECLINED';
                 reasons.push(`BMI ${bmi.toFixed(1)} too high`);
@@ -221,25 +217,18 @@ const Quoter: React.FC = () => {
                 reasons.push(`BMI ${bmi.toFixed(1)} too high for Level`);
             }
 
-            // 3. Medical Logic (The "Brain")
             selectedConditions.forEach(sc => {
                 const { conditionId, answers } = sc;
-
-                // --- DIABETES RULES ---
                 if (conditionId === 'diabetes') {
-                    if (answers['insulin'] === true) {
-                        if (plan.carrierName.includes('Transamerica')) {
-                            status = 'DECLINED';
-                            reasons.push('Declines Insulin usage');
-                        }
+                    if (answers['insulin'] === true && plan.carrierName.includes('Transamerica')) {
+                        status = 'DECLINED';
+                        reasons.push('Declines Insulin usage');
                     }
                     if (answers['complications'] === true && plan.type === 'LEVEL') {
                         status = 'DECLINED';
                         reasons.push('Diabetes complications knockout Level');
                     }
                 }
-
-                // --- COPD RULES ---
                 if (conditionId === 'copd') {
                     if (plan.type === 'LEVEL') {
                         status = 'DECLINED';
@@ -250,91 +239,25 @@ const Quoter: React.FC = () => {
                         reasons.push('Oxygen use is knockout');
                     }
                 }
-
-                // --- HEART ATTACK RULES ---
                 if (conditionId === 'heart_attack') {
                     const years = Number(answers['years_ago']);
                     if (years < 2 && plan.type === 'LEVEL') {
                         status = 'DECLINED';
                         reasons.push('Event within 2 years');
                     }
-                    if (years < 1 && plan.type === 'GRADED') {
-                        status = 'DECLINED';
-                        reasons.push('Event within 1 year');
-                    }
                 }
-
-                // --- STROKE RULES ---
-                if (conditionId === 'stroke') {
-                    const years = Number(answers['years_ago']);
-                    if (years < 2 && plan.type === 'LEVEL') {
-                        status = 'DECLINED';
-                        reasons.push('Stroke within 2 years');
-                    }
-                    if (years < 1 && plan.type === 'GRADED') {
-                        status = 'DECLINED';
-                        reasons.push('Stroke within 1 year');
-                    }
-                }
-
-                // --- CANCER RULES ---
-                if (conditionId === 'cancer') {
-                    const yearsFree = Number(answers['years_free']);
-                    if (yearsFree < 2 && plan.type !== 'GI') {
-                        status = 'DECLINED';
-                        reasons.push('Cancer within 2 years');
-                    }
-                }
-
-                // --- KIDNEY RULES ---
-                if (conditionId === 'kidney_disease') {
-                    if (answers['dialysis'] === true && plan.type !== 'GI') {
-                        status = 'DECLINED';
-                        reasons.push('Dialysis is knockout');
-                    }
-                }
-
-                // --- LIVER RULES ---
-                if (conditionId === 'liver_disease') {
-                    if (answers['cirrhosis'] === true && plan.type !== 'GI') {
-                        status = 'DECLINED';
-                        reasons.push('Cirrhosis is knockout');
-                    }
-                }
-
-                // --- NEURO RULES ---
                 if (conditionId === 'alzheimers' && plan.type !== 'GI') {
                     status = 'DECLINED';
                     reasons.push('Dementia/Alz is GI only');
                 }
-
-                if (conditionId === 'parkinsons') {
-                    if (answers['adl_help'] === true && plan.type !== 'GI') {
-                        status = 'DECLINED';
-                        reasons.push('ADL assistance required');
-                    }
-                }
-
-                // --- MENTAL HEALTH RULES ---
-                if (conditionId === 'depression') {
-                    if (answers['hospitalized'] === true && plan.type === 'LEVEL') {
-                        status = 'DECLINED';
-                        reasons.push('Hospitalization for mental health');
-                    }
-                }
             });
 
-            // Calculate Premium if Approved
             let monthlyPremium = 0;
             if (status === 'APPROVED') {
-                // Mock calculation: (Base Rate * Coverage/1000) * Factors + Fee
                 let rate = plan.baseRate;
                 if (inputs.tobacco === 'Yes') rate *= 1.3;
                 if (inputs.gender === 'Male') rate *= 1.2;
-                
-                // Age Factor (compound 3% per year over 50)
                 const ageFactor = Math.pow(1.03, Math.max(0, inputs.age - 50));
-                
                 monthlyPremium = (rate * ageFactor * (inputs.coverage / 1000)) + (plan.policyFee / 12);
             }
 
@@ -346,7 +269,6 @@ const Quoter: React.FC = () => {
             };
 
         }).filter(res => res.status === 'APPROVED' || res.reasons.length > 0).sort((a, b) => {
-            // Sort: Approved first, then by Price
             if (a.status === 'APPROVED' && b.status !== 'APPROVED') return -1;
             if (a.status !== 'APPROVED' && b.status === 'APPROVED') return 1;
             return a.monthlyPremium - b.monthlyPremium;
@@ -356,7 +278,7 @@ const Quoter: React.FC = () => {
     const numInputClass = "w-full p-2 border border-slate-700 rounded-lg text-sm bg-slate-950 text-white focus:ring-2 focus:ring-indigo-500 outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
     return (
-        <div className="animate-fade-in space-y-6 h-full flex flex-col">
+        <div className="animate-fade-in space-y-6 h-full flex flex-col pb-20">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
                 <div>
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -369,7 +291,7 @@ const Quoter: React.FC = () => {
             <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
                 
                 {/* LEFT PANEL: INPUTS */}
-                <div className="w-full lg:w-96 flex flex-col gap-6 overflow-y-auto pr-1">
+                <div className="w-full lg:w-96 flex flex-col gap-6 overflow-y-auto pr-1 custom-scrollbar">
                     
                     {/* Basic Info Card */}
                     <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-sm">
@@ -440,35 +362,17 @@ const Quoter: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Height & Weight */}
                             <div className="grid grid-cols-3 gap-3">
                                 <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-400 mb-1">Height</label>
                                     <div className="flex gap-1">
-                                        <input 
-                                            type="number"
-                                            placeholder="Ft"
-                                            className={numInputClass}
-                                            value={inputs.heightFt || ''}
-                                            onChange={e => setInputs({...inputs, heightFt: parseInt(e.target.value) || 0})}
-                                        />
-                                        <input 
-                                            type="number"
-                                            placeholder="In"
-                                            className={numInputClass}
-                                            value={inputs.heightIn || ''}
-                                            onChange={e => setInputs({...inputs, heightIn: parseInt(e.target.value) || 0})}
-                                        />
+                                        <input type="number" placeholder="Ft" className={numInputClass} value={inputs.heightFt || ''} onChange={e => setInputs({...inputs, heightFt: parseInt(e.target.value) || 0})} />
+                                        <input type="number" placeholder="In" className={numInputClass} value={inputs.heightIn || ''} onChange={e => setInputs({...inputs, heightIn: parseInt(e.target.value) || 0})} />
                                     </div>
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-xs font-medium text-slate-400 mb-1">Weight (lbs)</label>
-                                    <input 
-                                        type="number" 
-                                        className={numInputClass}
-                                        value={inputs.weight || ''}
-                                        onChange={e => setInputs({...inputs, weight: parseInt(e.target.value) || 0})}
-                                    />
+                                    <input type="number" className={numInputClass} value={inputs.weight || ''} onChange={e => setInputs({...inputs, weight: parseInt(e.target.value) || 0})} />
                                 </div>
                             </div>
 
@@ -495,7 +399,6 @@ const Quoter: React.FC = () => {
                             <Stethoscope size={16} className="text-red-500" /> Medical & Rx
                         </h3>
                         
-                        {/* Search Bar */}
                         <div className="relative mb-4">
                             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                             <input 
@@ -509,9 +412,8 @@ const Quoter: React.FC = () => {
                                 }}
                                 onFocus={() => setIsConditionDropdownOpen(true)}
                             />
-                            {/* Autocomplete Dropdown */}
                             {isConditionDropdownOpen && conditionSearch && (
-                                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto">
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto custom-scrollbar">
                                     {AVAILABLE_CONDITIONS.filter(c => c.name.toLowerCase().includes(conditionSearch.toLowerCase()))
                                         .map(c => (
                                             <div 
@@ -524,31 +426,20 @@ const Quoter: React.FC = () => {
                                             </div>
                                         ))
                                     }
-                                    {AVAILABLE_CONDITIONS.filter(c => c.name.toLowerCase().includes(conditionSearch.toLowerCase())).length === 0 && (
-                                        <div className="px-4 py-3 text-xs text-slate-500 text-center">No matching conditions</div>
-                                    )}
                                 </div>
                             )}
                         </div>
 
-                        {/* Selected Conditions List */}
                         <div className="space-y-4">
                             {selectedConditions.map((sc) => {
                                 const def = AVAILABLE_CONDITIONS.find(c => c.id === sc.conditionId);
                                 if (!def) return null;
-
                                 return (
                                     <div key={sc.conditionId} className="bg-slate-950 border border-slate-800 rounded-lg p-3 animate-fade-in shadow-sm">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="font-bold text-sm text-white">{def.name}</div>
-                                            <button 
-                                                onClick={() => removeCondition(sc.conditionId)}
-                                                className="text-slate-500 hover:text-red-400 transition-colors"
-                                            >
-                                                <X size={14} />
-                                            </button>
+                                            <button onClick={() => removeCondition(sc.conditionId)} className="text-slate-500 hover:text-red-400 transition-colors"><X size={14} /></button>
                                         </div>
-                                        {/* Dynamic Questions */}
                                         {def.questions && (
                                             <div className="space-y-2 mt-2 pt-2 border-t border-slate-800">
                                                 {def.questions.map(q => (
@@ -556,26 +447,11 @@ const Quoter: React.FC = () => {
                                                         <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{q.text}</label>
                                                         {q.type === 'BOOLEAN' ? (
                                                             <div className="flex gap-2">
-                                                                <button 
-                                                                    onClick={() => updateConditionAnswer(sc.conditionId, q.id, true)}
-                                                                    className={`px-3 py-1 rounded text-xs border ${sc.answers[q.id] === true ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                                                >
-                                                                    Yes
-                                                                </button>
-                                                                <button 
-                                                                    onClick={() => updateConditionAnswer(sc.conditionId, q.id, false)}
-                                                                    className={`px-3 py-1 rounded text-xs border ${sc.answers[q.id] === false ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                                                >
-                                                                    No
-                                                                </button>
+                                                                <button onClick={() => updateConditionAnswer(sc.conditionId, q.id, true)} className={`px-3 py-1 rounded text-xs border ${sc.answers[q.id] === true ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>Yes</button>
+                                                                <button onClick={() => updateConditionAnswer(sc.conditionId, q.id, false)} className={`px-3 py-1 rounded text-xs border ${sc.answers[q.id] === false ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>No</button>
                                                             </div>
                                                         ) : (
-                                                            <input 
-                                                                type="number"
-                                                                className="w-20 p-1 text-sm border border-slate-700 rounded bg-slate-900 text-white [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                                                                value={sc.answers[q.id] || ''}
-                                                                onChange={(e) => updateConditionAnswer(sc.conditionId, q.id, e.target.value)}
-                                                            />
+                                                            <input type="number" className="w-20 p-1 text-sm border border-slate-700 rounded bg-slate-900 text-white outline-none" value={sc.answers[q.id] || ''} onChange={(e) => updateConditionAnswer(sc.conditionId, q.id, e.target.value)} />
                                                         )}
                                                     </div>
                                                 ))}
@@ -584,104 +460,58 @@ const Quoter: React.FC = () => {
                                     </div>
                                 );
                             })}
-                            
-                            <div className="pt-4 border-t border-dashed border-slate-800">
-                                <div className="text-xs text-slate-500 font-medium uppercase tracking-wide mb-2 flex items-center gap-1">
-                                    <Pill size={12} /> Rx Lookup (Beta)
-                                </div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Type drug name..."
-                                    disabled
-                                    className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-600 cursor-not-allowed"
-                                />
-                            </div>
                         </div>
                     </div>
                 </div>
 
                 {/* RIGHT PANEL: RESULTS */}
                 <div className="flex-1 bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden flex flex-col">
-                    <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
+                    <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center shrink-0">
                         <div>
                             <h3 className="font-bold text-white">Quotes & Eligibility</h3>
                             <p className="text-xs text-slate-400">Based on {selectedConditions.length} health conditions.</p>
                         </div>
-                        <div className="flex gap-2">
-                            <span className="text-xs font-bold px-2 py-1 bg-green-500/10 text-green-400 rounded-lg border border-green-500/20">Level</span>
-                            <span className="text-xs font-bold px-2 py-1 bg-yellow-500/10 text-yellow-400 rounded-lg border border-yellow-500/20">Graded</span>
-                            <span className="text-xs font-bold px-2 py-1 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20">Declined</span>
-                        </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                        {underwritingResults.length === 0 ? (
-                            <div className="text-center py-10 text-slate-500">
-                                No plans available for these criteria.
-                            </div>
-                        ) : underwritingResults.map((result) => {
+                        {underwritingResults.map((result) => {
                             const isApproved = result.status === 'APPROVED';
-                            
                             return (
-                                <div key={result.id} className={`bg-slate-950 rounded-xl border shadow-sm transition-all relative overflow-hidden group
-                                    ${!isApproved ? 'border-red-900/30 opacity-70' : 'border-slate-800 hover:border-indigo-500/50'}`}>
-                                    
-                                    {/* Status Stripe */}
-                                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 
-                                        ${result.status === 'DECLINED' ? 'bg-red-500' : 
-                                          result.type === 'LEVEL' ? 'bg-green-500' : 
-                                          result.type === 'GRADED' || result.type === 'MODIFIED' ? 'bg-yellow-500' : 'bg-blue-500'}`}>
-                                    </div>
-
+                                <div key={result.id} className={`bg-slate-950 rounded-xl border shadow-sm transition-all relative overflow-hidden group ${!isApproved ? 'border-red-900/30 opacity-70' : 'border-slate-800 hover:border-indigo-500/50'}`}>
+                                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${result.status === 'DECLINED' ? 'bg-red-500' : result.type === 'LEVEL' ? 'bg-green-500' : 'bg-yellow-500'}`} />
                                     <div className="p-4 pl-6 flex flex-col sm:flex-row items-center gap-4">
-                                        {/* Logo / Name */}
                                         <div className="flex-1 flex items-center gap-4 w-full">
-                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-xs shadow-sm ${result.logoColor}`}>
-                                                {result.carrierName.substring(0, 2)}
-                                            </div>
+                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-xs shadow-sm ${result.logoColor}`}>{result.carrierName.substring(0, 2)}</div>
                                             <div>
                                                 <h4 className="font-bold text-white">{result.carrierName}</h4>
                                                 <p className="text-xs text-slate-400 font-medium">{result.planName}</p>
-                                                <div className="flex gap-2 mt-1">
-                                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border 
-                                                        ${result.type === 'LEVEL' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 
-                                                          result.type === 'GI' ? 'text-blue-400 border-blue-500/30 bg-blue-500/10' : 
-                                                          'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>
-                                                        {result.type}
-                                                    </span>
-                                                </div>
+                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border mt-1 inline-block ${result.type === 'LEVEL' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{result.type}</span>
                                             </div>
                                         </div>
-
-                                        {/* Decision & Price */}
                                         <div className="text-right w-full sm:w-auto">
                                             {isApproved ? (
-                                                <>
-                                                    <div className="text-2xl font-bold text-white">${result.monthlyPremium.toFixed(2)}</div>
-                                                    <div className="text-xs text-slate-500">per month</div>
-                                                </>
+                                                <><div className="text-2xl font-bold text-white">${result.monthlyPremium.toFixed(2)}</div><div className="text-xs text-slate-500 uppercase font-black">per month</div></>
                                             ) : (
-                                                <div className="flex items-center gap-1 text-red-500 font-bold">
-                                                    <XCircle size={18} /> DECLINED
-                                                </div>
+                                                <div className="flex items-center gap-1 text-red-500 font-bold uppercase text-xs"><XCircle size={14} /> DECLINED</div>
                                             )}
                                         </div>
-
-                                        {/* Action */}
                                         {isApproved && (
-                                            <button className="w-full sm:w-auto px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm">
-                                                Select
-                                            </button>
+                                            <div className="flex gap-2">
+                                                <button 
+                                                    onClick={() => openProposal(result)}
+                                                    className="p-2 text-slate-400 hover:text-indigo-400 transition-all border border-slate-800 rounded-lg hover:bg-slate-800"
+                                                    title="Generate Proposal PDF"
+                                                >
+                                                    <FileDown size={18} />
+                                                </button>
+                                                <button className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm uppercase tracking-tighter">Select</button>
+                                            </div>
                                         )}
                                     </div>
-
-                                    {/* Reasons / Knockouts */}
                                     {result.reasons.length > 0 && (
                                         <div className="px-6 py-2 bg-red-900/10 border-t border-red-900/20 flex items-start gap-2">
                                             <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
-                                            <p className="text-xs text-red-400 font-medium">
-                                                {result.reasons.join(', ')}
-                                            </p>
+                                            <p className="text-xs text-red-400 font-medium">{result.reasons.join(', ')}</p>
                                         </div>
                                     )}
                                 </div>
@@ -690,6 +520,127 @@ const Quoter: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Proposal Generation Modal (PDF Simulated Preview) */}
+            {isProposalModalOpen && selectedProposalPlan && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+                    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh] animate-fade-in relative ring-1 ring-black">
+                        {/* Control Bar */}
+                        <div className="p-4 bg-slate-900 border-b border-white/10 flex justify-between items-center sticky top-0 z-10">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-600 rounded-lg"><FileDown className="text-white" size={20} /></div>
+                                <div>
+                                    <h3 className="font-black text-white text-sm uppercase tracking-widest">Quote Proposal Preview</h3>
+                                    <p className="text-[10px] text-slate-500 uppercase font-bold">Proposal ID: PROP-{Math.random().toString(36).substring(7).toUpperCase()}</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button className="p-2 text-slate-400 hover:text-white transition-colors" title="Print"><Printer size={18} /></button>
+                                <button className="p-2 text-slate-400 hover:text-white transition-colors" title="Download"><Download size={18} /></button>
+                                <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-black uppercase tracking-widest hover:bg-indigo-500 transition-all ml-2 shadow-xl active:scale-95">
+                                    <Mail size={14} /> Email Client
+                                </button>
+                                <button onClick={() => setIsProposalModalOpen(false)} className="ml-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-all"><X size={20} /></button>
+                            </div>
+                        </div>
+
+                        {/* Proposal Document Body (Printable Styling) */}
+                        <div className="flex-1 overflow-y-auto bg-slate-50 p-12 custom-scrollbar">
+                            <div className="max-w-[800px] mx-auto bg-white p-12 shadow-2xl min-h-[1056px] text-slate-900 font-sans border border-slate-200">
+                                {/* Letterhead */}
+                                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-8 mb-10">
+                                    <div>
+                                        <h1 className="text-3xl font-black tracking-tighter text-slate-900 uppercase">ARISE FINANCIAL</h1>
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mt-1">Systems • Planning • Protection</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="font-black text-sm uppercase">Personalized Proposal</p>
+                                        <p className="text-xs text-slate-500 mt-1">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-12">
+                                    {/* Summary Section */}
+                                    <div className="grid grid-cols-2 gap-12">
+                                        <div>
+                                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2">Client Overview</h4>
+                                            <div className="space-y-2">
+                                                <p className="text-xl font-bold">Valued Prospect</p>
+                                                <div className="text-sm space-y-1 text-slate-600">
+                                                    <p>Age: <span className="font-bold text-slate-900">{inputs.age}</span></p>
+                                                    <p>State: <span className="font-bold text-slate-900">{inputs.state}</span></p>
+                                                    <p>Nicotine: <span className="font-bold text-slate-900">{inputs.tobacco}</span></p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="bg-slate-900 text-white p-6 rounded-2xl">
+                                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Total Coverage Recommendation</h4>
+                                            <h3 className="text-4xl font-black tracking-tighter">${inputs.coverage.toLocaleString()}</h3>
+                                            <p className="text-[10px] text-indigo-400 font-bold uppercase mt-2">Cash Payout Benefit</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Primary Option Card */}
+                                    <div className="border-2 border-indigo-600 rounded-3xl overflow-hidden shadow-xl">
+                                        <div className="bg-indigo-600 p-4 flex justify-between items-center text-white">
+                                            <span className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><CheckCircle2 size={16}/> Top Recommendation</span>
+                                            <span className="text-[10px] font-bold uppercase">Best Value Policy</span>
+                                        </div>
+                                        <div className="p-8 flex items-center justify-between bg-white">
+                                            <div className="flex items-center gap-6">
+                                                <div className={`w-16 h-16 rounded-2xl ${selectedProposalPlan.logoColor} flex items-center justify-center text-white font-black text-xl shadow-lg`}>{selectedProposalPlan.carrierName.substring(0,2)}</div>
+                                                <div>
+                                                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">{selectedProposalPlan.carrierName}</h3>
+                                                    <p className="text-sm font-bold text-indigo-600 uppercase tracking-wide">{selectedProposalPlan.planName}</p>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-4xl font-black text-slate-900">${selectedProposalPlan.monthlyPremium.toFixed(2)}</p>
+                                                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Fixed Monthly Cost</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Comparison Section */}
+                                    <div>
+                                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-6 flex items-center gap-2">
+                                            <Building2 size={16} className="text-indigo-600" /> Carrier Comparison Details
+                                        </h4>
+                                        <div className="space-y-3">
+                                            {underwritingResults.filter(r => r.status === 'APPROVED' && r.id !== selectedProposalPlan.id).slice(0, 3).map((comp, idx) => (
+                                                <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-10 h-10 rounded-lg ${comp.logoColor} flex items-center justify-center text-white font-black text-xs`}>{comp.carrierName.substring(0,2)}</div>
+                                                        <div>
+                                                            <p className="text-sm font-black text-slate-900">{comp.carrierName}</p>
+                                                            <p className="text-[10px] text-slate-500 font-bold uppercase">{comp.planName}</p>
+                                                        </div>
+                                                    </div>
+                                                    <p className="font-black text-slate-900">${comp.monthlyPremium.toFixed(2)} /mo</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Footnotes */}
+                                    <div className="pt-8 border-t border-slate-100 text-[10px] text-slate-400 leading-relaxed space-y-4 italic">
+                                        <p>Disclaimer: This proposal is an estimate based on information provided. Actual rates are determined by carrier underwriting and final medical review. No coverage is in effect until a policy is issued and the first premium is paid.</p>
+                                        <div className="flex justify-between items-end not-italic">
+                                            <div>
+                                                <p className="font-black text-slate-900 uppercase text-xs">Randy Rodriguez</p>
+                                                <p className="font-bold text-slate-500">Authorized Agent • Arise HQ</p>
+                                            </div>
+                                            <div className="bg-slate-100 px-4 py-2 rounded-xl border border-slate-200">
+                                                <p className="font-black text-indigo-600 uppercase tracking-widest text-[9px]">Verified Quote</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

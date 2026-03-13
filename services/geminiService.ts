@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Chat, GenerateContentResponse, LiveServerMessage, Modality, Blob } from "@google/genai";
 import { ChatMessage } from "../types";
 
@@ -151,12 +152,15 @@ export const parseCommissionDocument = async (base64Data: string, mimeType: stri
 
 export const connectToLiveDojo = (callbacks: {
     onopen?: () => void;
-    onmessage?: (message: LiveServerMessage) => void;
+    onmessage: (message: LiveServerMessage) => void;
     onerror?: (e: any) => void;
     onclose?: (e: CloseEvent) => void;
 }, systemInstruction: string) => {
+    /**
+     * Fix: Updated model name to gemini-2.5-flash-native-audio-preview-12-2025 as per GenAI coding guidelines.
+     */
     return ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks,
         config: {
             responseModalities: [Modality.AUDIO],
