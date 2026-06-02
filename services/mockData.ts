@@ -227,6 +227,7 @@ export const MOCK_CLIENTS: Client[] = [
     healthConditions: 'None',
     currentPrescriptions: 'None',
     paymentMethod: 'Bank Draft',
+    draftDate: '15',
     bankName: 'Chase Bank',
     routingNumber: '123456789',
     accountNumber: '987654321',
@@ -241,6 +242,7 @@ export const MOCK_CLIENTS: Client[] = [
         commission: 10800,
         startDate: '2023-05-15',
         endDate: '2093-05-15',
+        draftDate: '15',
         status: PolicyStatus.ACTIVE,
         isPaidOut: true
       }

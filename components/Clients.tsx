@@ -40,10 +40,16 @@ const maskCard = (card?: string) => {
   return `**** **** **** ${digits.slice(-4)}`;
 };
 
-const getOrdinal = (n: number) => {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+const getDraftDateOptions = () => {
+  const options = [];
+  for (let i = 1; i <= 28; i++) {
+    let suffix = 'th';
+    if (i === 1 || i === 21) suffix = 'st';
+    else if (i === 2 || i === 22) suffix = 'nd';
+    else if (i === 3 || i === 23) suffix = 'rd';
+    options.push({ value: i.toString(), label: `${i}${suffix} of the month` });
+  }
+  return options;
 };
 
 export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpdateClients, onSelectClient, selectedClient }) => {
@@ -336,6 +342,7 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
           submittedDate: editingPolicy.submittedDate || getLocalToday(),
           endDate: endDate,
           status: finalStatus,
+          draftDate: editingPolicy.draftDate,
           productName: editingPolicy.productName || 'Manual Policy',
           isPaidOut: finalStatus === PolicyStatus.ACTIVE 
       };
@@ -862,11 +869,9 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                         value={editForm.draftDate || ''}
                                         onChange={(e) => setEditForm({...editForm, draftDate: e.target.value})}
                                     >
-                                        <option value="">Select Date</option>
-                                        {Array.from({ length: 28 }, (_, i) => i + 1).map(day => (
-                                            <option key={day} value={day.toString()}>
-                                                {getOrdinal(day)} of the month
-                                            </option>
+                                        <option value="">Select Draft Date</option>
+                                        {getDraftDateOptions().map(opt => (
+                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
                                         ))}
                                     </select>
                                 </div>
@@ -950,12 +955,14 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                     <p className="text-slate-500 text-xs">Method</p>
                                     <p className="text-slate-200">{selectedClient.paymentMethod || 'Not set'}</p>
                                 </div>
-                                <div>
-                                    <p className="text-slate-500 text-xs">Draft Date</p>
-                                    <p className="text-slate-200">
-                                        {selectedClient.draftDate ? `${getOrdinal(parseInt(selectedClient.draftDate))} of the month` : 'Not set'}
-                                    </p>
-                                </div>
+                                {selectedClient.draftDate && (
+                                    <div>
+                                        <p className="text-slate-500 text-xs">Draft Date</p>
+                                        <p className="text-slate-200">
+                                            {getDraftDateOptions().find(o => o.value === selectedClient.draftDate)?.label || selectedClient.draftDate}
+                                        </p>
+                                    </div>
+                                )}
                                 {selectedClient.paymentMethod === 'Bank Draft' && (
                                     <div className="grid grid-cols-2 gap-y-3 border-t border-white/5 pt-3">
                                         <div>
@@ -1063,8 +1070,7 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                       {policy.status}
                                   </span>
                               </div>
-                               <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 border-b border-white/5 pb-4 mb-4">
-                                   <div className="flex justify-between items-center">
+                              <div className="mt-4 flex items-center justify-between text-sm text-slate-400 border-b border-white/5 pb-4 mb-4">
                                   <div>
                                       <span className="text-slate-500">Term:</span> {policy.startDate} - {policy.endDate}
                                   </div>
@@ -1072,6 +1078,13 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                       ${policy.premium.toLocaleString()} / yr
                                   </div>
                               </div>
+
+                              {policy.draftDate && (
+                                <div className="mb-4 flex items-center gap-2 text-xs text-slate-400 bg-slate-800/30 w-fit px-2 py-1 rounded">
+                                    <Calendar size={12} className="text-indigo-400" />
+                                    <span>Draft Date: {getDraftDateOptions().find(o => o.value === policy.draftDate)?.label || policy.draftDate}</span>
+                                </div>
+                              )}
                               
                               {/* Commission Breakdown Section */}
                               <div className="bg-slate-950/50 rounded-lg p-3 border border-white/5">
@@ -1266,6 +1279,22 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                 />
                             </div>
                             <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Draft Date</label>
+                                <select 
+                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
+                                    value={editingPolicy.draftDate || ''}
+                                    onChange={(e) => setEditingPolicy({...editingPolicy, draftDate: e.target.value})}
+                                >
+                                    <option value="">Select Draft Date</option>
+                                    {getDraftDateOptions().map(opt => (
+                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Policy Type</label>
                                 <select 
                                     className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
@@ -1331,24 +1360,6 @@ export const Clients: React.FC<ClientsProps> = ({ clients, currentUserId, onUpda
                                         onChange={(e) => setEditingPolicy({...editingPolicy, startDate: e.target.value})}
                                     />
                                 </div>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Draft Date</label>
-                                <select 
-                                    className="w-full border border-slate-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-950 text-white"
-                                    value={editingPolicy.draftDate || ''}
-                                    onChange={(e) => setEditingPolicy({...editingPolicy, draftDate: e.target.value})}
-                                >
-                                    <option value="">Select Date</option>
-                                    {Array.from({ length: 28 }, (_, i) => i + 1).map(day => (
-                                        <option key={day} value={day.toString()}>
-                                            {getOrdinal(day)} of the month
-                                        </option>
-                                    ))}
-                                </select>
                             </div>
                         </div>
                         {editingPolicy.type === PolicyType.TERM && (
